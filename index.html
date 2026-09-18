@@ -1,0 +1,1758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hero Runner</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 800px;
+            height: 500px;
+            border: 3px solid #fff;
+            border-radius: 10px;
+            box-shadow: 0 10px 50px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+        }
+        
+        #gameCanvas {
+            display: block;
+            background-color: #87CEEB;
+        }
+        
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            z-index: 100;
+        }
+        
+        .screen.active {
+            display: flex;
+        }
+        
+        .screen h1 {
+            font-size: 48px;
+            margin-bottom: 30px;
+            text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.7);
+        }
+        
+        .screen h2 {
+            font-size: 36px;
+            margin-bottom: 20px;
+        }
+        
+        .screen p {
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+        
+        .level-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .level-card {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+            position: relative;
+        }
+        
+        .level-card:hover:not(.locked) {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.05);
+        }
+        
+        .level-card.locked {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .level-card.completed {
+            border-color: #4CAF50;
+            background: rgba(76, 175, 80, 0.2);
+        }
+        
+        .level-card .level-name {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .level-card .level-time {
+            font-size: 14px;
+            color: #ccc;
+        }
+        
+        .level-card .difficulty {
+            font-size: 16px;
+            color: gold;
+            margin-top: 5px;
+        }
+        
+        .level-card .lock-icon {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            font-size: 20px;
+        }
+        
+        .level-card .check-icon {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            font-size: 20px;
+            color: #4CAF50;
+        }
+        
+        .level-card .best-score {
+            font-size: 12px;
+            color: #aaa;
+            margin-top: 5px;
+        }
+        
+        .button {
+            padding: 12px 30px;
+            font-size: 18px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px;
+            transition: all 0.3s;
+            font-weight: bold;
+        }
+        
+        .button-primary {
+            background: #4CAF50;
+            color: white;
+        }
+        
+        .button-primary:hover {
+            background: #45a049;
+        }
+        
+        .button-secondary {
+            background: #2196F3;
+            color: white;
+        }
+        
+        .button-secondary:hover {
+            background: #0b7dda;
+        }
+        
+        #hud {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            padding: 10px;
+            display: none;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            font-size: 16px;
+            z-index: 50;
+        }
+        
+        #hud.active {
+            display: flex;
+        }
+        
+        .hud-left, .hud-center, .hud-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .hud-center {
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .level-indicator {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        
+        .timer {
+            font-size: 32px;
+            font-weight: bold;
+            color: #FFD700;
+        }
+        
+        .progress-bar {
+            width: 200px;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #8BC34A);
+            transition: width 0.1s;
+        }
+        
+        .stars {
+            font-size: 48px;
+            color: gold;
+            margin: 20px 0;
+        }
+        
+        .star-empty {
+            color: #555;
+        }
+        
+        #levelAnnouncement {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 48px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.8);
+            z-index: 75;
+            display: none;
+            animation: announcementFade 2s ease-out;
+        }
+        
+        @keyframes announcementFade {
+            0% {
+                opacity: 0;
+                transform: translate(-50%, -50%) scale(0.5);
+            }
+            20% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1.2);
+            }
+            80% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1);
+            }
+            100% {
+                opacity: 0;
+                transform: translate(-50%, -50%) scale(1);
+            }
+        }
+        
+        .fade-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: black;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s;
+            z-index: 200;
+        }
+        
+        .fade-overlay.active {
+            opacity: 1;
+        }
+        
+        .legend {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 12px;
+            text-align: center;
+            z-index: 50;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 5px;
+        }
+        
+        .pause-stats {
+            font-size: 18px;
+            margin: 15px 0;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="800" height="500"></canvas>
+        
+        <div id="hud">
+            <div class="hud-left">
+                <div>Score: <span id="score">0</span></div>
+                <div>Best: <span id="highScore">0</span></div>
+            </div>
+            <div class="hud-center">
+                <div class="level-indicator" id="levelName">Level 1: Forest Meadow</div>
+                <div class="timer" id="timer">60s</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill" style="width: 100%;"></div>
+                </div>
+            </div>
+            <div class="hud-right">
+                <div>Size: <span id="size">100</span>%</div>
+                <div>Speed: <span id="speed">1.0</span>x</div>
+            </div>
+        </div>
+        
+        <div class="legend">
+            🔴 Red = Grow | 🟢 Green = Shrink | 🟡 Yellow = Coin | 🟠 Golden = +25 | 🟣 Purple = Double Jump | 🔵 Blue = Ice Shield | 🐦 Red = Birds
+        </div>
+        
+        <div id="levelAnnouncement"></div>
+        <div class="fade-overlay" id="fadeOverlay"></div>
+        
+        <!-- Main Menu Screen -->
+        <div id="mainMenu" class="screen active">
+            <h1>🏃 Hero Runner</h1>
+            <h2>Select a Level</h2>
+            <div class="level-grid" id="levelGrid"></div>
+        </div>
+        
+        <!-- Level Complete Screen -->
+        <div id="levelComplete" class="screen">
+            <h2>✅ LEVEL COMPLETE!</h2>
+            <div class="stars" id="stars">★★★</div>
+            <p>Score: <span id="finalScore">0</span></p>
+            <p>Best: <span id="finalHighScore">0</span></p>
+            <button class="button button-primary" id="nextLevelBtn">Next Level</button>
+            <button class="button button-secondary" id="menuBtn1">Main Menu</button>
+        </div>
+        
+        <!-- Game Over Screen -->
+        <div id="gameOver" class="screen">
+            <h2>💀 GAME OVER</h2>
+            <p>Score: <span id="gameOverScore">0</span></p>
+            <p>Best: <span id="gameOverHighScore">0</span></p>
+            <button class="button button-primary" id="retryBtn">Retry Level</button>
+            <button class="button button-secondary" id="menuBtn2">Main Menu</button>
+        </div>
+        
+        <!-- Pause Screen -->
+        <div id="pauseScreen" class="screen">
+            <h2>⏸ PAUSED</h2>
+            <p>Press P or Esc to resume</p>
+            <div class="pause-stats">
+                <p>Score: <span id="pauseScore">0</span></p>
+                <p>Time: <span id="pauseTime">0</span>s</p>
+                <p>Level: <span id="pauseLevel">Forest Meadow</span></p>
+            </div>
+            <button class="button button-primary" id="resumeBtn">Resume</button>
+            <button class="button button-secondary" id="menuBtn3">Main Menu</button>
+        </div>
+    </div>
+
+    <script>
+        // Game constants
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Game states
+        const GameState = {
+            MENU: 'MENU',
+            PLAYING: 'PLAYING',
+            PAUSED: 'PAUSED',
+            LEVEL_COMPLETE: 'LEVEL_COMPLETE',
+            GAME_OVER: 'GAME_OVER'
+        };
+        
+        let currentState = GameState.MENU;
+        
+        // Level data with FIXED spawning parameters
+        const levels = [
+            {
+                id: 1,
+                name: "Forest Meadow",
+                targetTime: 60,
+                background: "#87CEEB",
+                groundColor: "#228B22",
+                obstacleFrequency: 1.0,
+                birdFrequency: 0.3,
+                platformFrequency: 1.2,
+                speedGrowthRate: 0.008,
+                // FIXED: Proper spawning intervals
+                obstacleInterval: [3000, 5000], // 3-5 seconds
+                maxObstacles: 3,
+                obstacleGap: 200,
+                birdInterval: [15000, 20000],
+                platformInterval: [3000, 5000],
+                shrinkerInterval: [15000, 20000],
+                iceShieldInterval: [20000, 25000],
+                doubleJumpInterval: [25000, 30000],
+                coinInterval: [2000, 3000],
+                goldenCoinInterval: [5000, 8000]
+            },
+            {
+                id: 2,
+                name: "Desert Dunes",
+                targetTime: 90,
+                background: "#FFE4B5",
+                groundColor: "#D2691E",
+                obstacleFrequency: 1.2,
+                birdFrequency: 0.6,
+                platformFrequency: 0.9,
+                speedGrowthRate: 0.010,
+                obstacleInterval: [2500, 4000], // 2.5-4 seconds
+                maxObstacles: 3,
+                obstacleGap: 200,
+                birdInterval: [10000, 15000],
+                platformInterval: [3000, 5000],
+                shrinkerInterval: [15000, 20000],
+                iceShieldInterval: [20000, 25000],
+                doubleJumpInterval: [25000, 30000],
+                coinInterval: [2000, 3000],
+                goldenCoinInterval: [5000, 8000]
+            },
+            {
+                id: 3,
+                name: "Mountain Peak",
+                targetTime: 120,
+                background: "#E0E0E0",
+                groundColor: "#696969",
+                obstacleFrequency: 1.4,
+                birdFrequency: 0.9,
+                platformFrequency: 1.1,
+                speedGrowthRate: 0.012,
+                obstacleInterval: [2000, 3500], // 2-3.5 seconds
+                maxObstacles: 3,
+                obstacleGap: 200,
+                birdInterval: [8000, 12000],
+                platformInterval: [3000, 5000],
+                shrinkerInterval: [15000, 20000],
+                iceShieldInterval: [20000, 25000],
+                doubleJumpInterval: [25000, 30000],
+                coinInterval: [2000, 3000],
+                goldenCoinInterval: [5000, 8000]
+            },
+            {
+                id: 4,
+                name: "Volcanic Fury",
+                targetTime: 150,
+                background: "#2F1B1B",
+                groundColor: "#8B0000",
+                obstacleFrequency: 1.6,
+                birdFrequency: 1.2,
+                platformFrequency: 0.8,
+                speedGrowthRate: 0.015,
+                obstacleInterval: [1500, 3000], // 1.5-3 seconds
+                maxObstacles: 3,
+                obstacleGap: 200,
+                birdInterval: [6000, 10000],
+                platformInterval: [3000, 5000],
+                shrinkerInterval: [15000, 20000],
+                iceShieldInterval: [20000, 25000],
+                doubleJumpInterval: [25000, 30000],
+                coinInterval: [2000, 3000],
+                goldenCoinInterval: [5000, 8000]
+            },
+            {
+                id: 5,
+                name: "Cosmic Void",
+                targetTime: 180,
+                background: "#0D0221",
+                groundColor: "#4B0082",
+                obstacleFrequency: 1.8,
+                birdFrequency: 1.5,
+                platformFrequency: 1.0,
+                speedGrowthRate: 0.018,
+                obstacleInterval: [1000, 2500], // 1-2.5 seconds
+                maxObstacles: 3,
+                obstacleGap: 200,
+                birdInterval: [5000, 8000],
+                platformInterval: [3000, 5000],
+                shrinkerInterval: [15000, 20000],
+                iceShieldInterval: [20000, 25000],
+                doubleJumpInterval: [25000, 30000],
+                coinInterval: [2000, 3000],
+                goldenCoinInterval: [5000, 8000]
+            }
+        ];
+        
+        // Game variables
+        let currentLevel = null;
+        let levelTimeRemaining = 0;
+        let score = 0;
+        let highScore = 0;
+        let speedMultiplier = 1.0;
+        let gameTime = 0;
+        let lastTime = 0;
+        
+        // Player object
+        const player = {
+            x: 100,
+            y: canvas.height - 100,
+            radius: 20,
+            velocityY: 0,
+            jumping: false,
+            doubleJumpAvailable: true,
+            hasDoubleJump: false,
+            doubleJumpTimer: 0,
+            invincible: false,
+            invincibleTimer: 0,
+            hasIceShield: false,
+            iceShieldTimer: 0,
+            color: 'blue',
+            faceState: 'normal',
+            hitAnimationTimer: 0,
+            ouchTimer: 0
+        };
+        
+        // Screen shake variables
+        let shakeTimer = 0;
+        let shakeIntensity = 0;
+        
+        // Game objects
+        let obstacles = [];
+        let birds = [];
+        let shrinkers = [];
+        let coins = [];
+        let goldenCoins = [];
+        let doubleJumps = [];
+        let iceShields = [];
+        let platforms = [];
+        let particles = [];
+        
+        // SIMPLE SPAWN TIMERS - accumulate deltaTime
+        let obstacleSpawnTimer = 0;
+        let birdSpawnTimer = 0;
+        let platformSpawnTimer = 0;
+        let coinSpawnTimer = 0;
+        let goldenCoinSpawnTimer = 0;
+        let shrinkerSpawnTimer = 0;
+        let iceShieldSpawnTimer = 0;
+        let doubleJumpSpawnTimer = 0;
+        
+        // Progress tracking
+        let unlockedLevels = [1];
+        let completedLevels = [];
+        let levelBestScores = {};
+        
+        // Initialize game
+        function init() {
+            loadProgress();
+            renderLevelGrid();
+            setupEventListeners();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Load progress from localStorage
+        function loadProgress() {
+            const saved = localStorage.getItem('heroRunnerProgress');
+            if (saved) {
+                const progress = JSON.parse(saved);
+                unlockedLevels = progress.unlockedLevels || [1];
+                completedLevels = progress.completedLevels || [];
+                levelBestScores = progress.levelBestScores || {};
+            }
+        }
+        
+        // Save progress to localStorage
+        function saveProgress() {
+            const progress = {
+                unlockedLevels,
+                completedLevels,
+                levelBestScores
+            };
+            localStorage.setItem('heroRunnerProgress', JSON.stringify(progress));
+        }
+        
+        // Render level grid in main menu
+        function renderLevelGrid() {
+            const grid = document.getElementById('levelGrid');
+            grid.innerHTML = '';
+            
+            levels.forEach(level => {
+                const card = document.createElement('div');
+                card.className = 'level-card';
+                
+                const isUnlocked = unlockedLevels.includes(level.id);
+                const isCompleted = completedLevels.includes(level.id);
+                const bestScore = levelBestScores[level.id] || 0;
+                
+                if (!isUnlocked) {
+                    card.classList.add('locked');
+                }
+                if (isCompleted) {
+                    card.classList.add('completed');
+                }
+                
+                card.innerHTML = `
+                    <div class="level-name">${level.name}</div>
+                    <div class="level-time">Target: ${level.targetTime}s</div>
+                    <div class="difficulty">${getDifficultyStars(level)}</div>
+                    ${!isUnlocked ? '<div class="lock-icon">🔒</div>' : ''}
+                    ${isCompleted ? '<div class="check-icon">✓</div>' : ''}
+                    ${bestScore > 0 ? `<div class="best-score">Best: ${bestScore}</div>` : ''}
+                `;
+                
+                if (isUnlocked) {
+                    card.addEventListener('click', () => startLevel(level.id));
+                }
+                
+                grid.appendChild(card);
+            });
+        }
+        
+        // Get difficulty stars based on level parameters
+        function getDifficultyStars(level) {
+            const difficulty = level.obstacleFrequency + level.birdFrequency;
+            if (difficulty < 1.5) return '★☆☆';
+            if (difficulty < 2.5) return '★★☆';
+            return '★★★';
+        }
+        
+        // Start a level
+        function startLevel(levelId) {
+            currentLevel = levels.find(l => l.id === levelId);
+            if (!currentLevel) return;
+            
+            resetGame();
+            currentState = GameState.PLAYING;
+            
+            // Update UI
+            document.getElementById('mainMenu').classList.remove('active');
+            document.getElementById('hud').classList.add('active');
+            document.getElementById('levelName').textContent = `Level ${currentLevel.id}: ${currentLevel.name}`;
+            
+            // Show level announcement
+            showLevelAnnouncement();
+            
+            // Fade in effect
+            const fadeOverlay = document.getElementById('fadeOverlay');
+            fadeOverlay.classList.add('active');
+            setTimeout(() => {
+                fadeOverlay.classList.remove('active');
+            }, 500);
+            
+            // Update high score display
+            highScore = levelBestScores[currentLevel.id] || 0;
+            document.getElementById('highScore').textContent = highScore;
+        }
+        
+        // Show level announcement
+        function showLevelAnnouncement() {
+            const announcement = document.getElementById('levelAnnouncement');
+            announcement.textContent = `Level ${currentLevel.id}: ${currentLevel.name}`;
+            announcement.style.display = 'block';
+            
+            setTimeout(() => {
+                announcement.style.display = 'none';
+            }, 2000);
+        }
+        
+        // Reset game state
+        function resetGame() {
+            player.x = 100;
+            player.y = canvas.height - 100;
+            player.radius = 20;
+            player.velocityY = 0;
+            player.jumping = false;
+            player.doubleJumpAvailable = true;
+            player.hasDoubleJump = false;
+            player.doubleJumpTimer = 0;
+            player.invincible = false;
+            player.invincibleTimer = 0;
+            player.hasIceShield = false;
+            player.iceShieldTimer = 0;
+            player.color = 'blue';
+            player.faceState = 'normal';
+            player.hitAnimationTimer = 0;
+            player.ouchTimer = 0;
+            
+            shakeTimer = 0;
+            shakeIntensity = 0;
+            
+            obstacles = [];
+            birds = [];
+            shrinkers = [];
+            coins = [];
+            goldenCoins = [];
+            doubleJumps = [];
+            iceShields = [];
+            platforms = [];
+            particles = [];
+            
+            score = 0;
+            speedMultiplier = 1.0;
+            gameTime = 0;
+            lastTime = 0;
+            
+            // Reset spawn timers
+            obstacleSpawnTimer = 0;
+            birdSpawnTimer = 0;
+            platformSpawnTimer = 0;
+            coinSpawnTimer = 0;
+            goldenCoinSpawnTimer = 0;
+            shrinkerSpawnTimer = 0;
+            iceShieldSpawnTimer = 0;
+            doubleJumpSpawnTimer = 0;
+            
+            levelTimeRemaining = currentLevel.targetTime;
+            
+            // Update UI
+            document.getElementById('score').textContent = score;
+            document.getElementById('size').textContent = 100;
+            document.getElementById('speed').textContent = speedMultiplier.toFixed(1);
+            document.getElementById('timer').textContent = Math.ceil(levelTimeRemaining) + 's';
+            document.getElementById('progressFill').style.width = '100%';
+        }
+        
+        // Jump function
+        function jump() {
+            if (currentState !== GameState.PLAYING) return;
+            
+            if (!player.jumping) {
+                player.velocityY = -15;
+                player.jumping = true;
+            } else if (player.hasDoubleJump && player.doubleJumpAvailable) {
+                player.velocityY = -12;
+                player.doubleJumpAvailable = false;
+                
+                // Add double jump particles
+                for (let i = 0; i < 8; i++) {
+                    particles.push({
+                        x: player.x,
+                        y: player.y + player.radius,
+                        vx: (Math.random() - 0.5) * 4,
+                        vy: Math.random() * 2,
+                        radius: Math.random() * 3 + 2,
+                        color: 'purple',
+                        life: 30
+                    });
+                }
+            }
+        }
+        
+        // Handle player hit with visual effects
+        function handlePlayerHit(grow) {
+            if (player.invincible) return;
+            
+            if (player.hasIceShield) {
+                player.hasIceShield = false;
+                player.iceShieldTimer = 0;
+                
+                for (let i = 0; i < 15; i++) {
+                    const angle = (Math.PI * 2 / 15) * i;
+                    particles.push({
+                        x: player.x,
+                        y: player.y,
+                        vx: Math.cos(angle) * (Math.random() * 3 + 2),
+                        vy: Math.sin(angle) * (Math.random() * 3 + 2),
+                        radius: Math.random() * 3 + 2,
+                        color: Math.random() > 0.5 ? '#00FFFF' : '#E0F6FF',
+                        life: 40
+                    });
+                }
+                
+                particles.push({
+                    x: player.x,
+                    y: player.y - player.radius - 20,
+                    vx: 0,
+                    vy: -1,
+                    radius: 0,
+                    color: '#00FFFF',
+                    life: 60,
+                    text: 'Shield Broken!'
+                });
+                
+                return;
+            }
+            
+            if (grow) {
+                player.radius *= 1.15;
+            } else {
+                player.radius *= 0.8;
+                if (player.radius < 10) player.radius = 10;
+            }
+            
+            player.invincible = true;
+            player.invincibleTimer = 90;
+            
+            player.faceState = 'ouch';
+            player.hitAnimationTimer = 0.8;
+            player.ouchTimer = 48;
+            
+            shakeTimer = 0.3;
+            shakeIntensity = 6;
+            
+            particles.push({
+                x: player.x,
+                y: player.y - player.radius - 10,
+                vx: 0,
+                vy: -0.5,
+                radius: 0,
+                color: '#FF6B6B',
+                life: 48,
+                text: 'Ouch!'
+            });
+            
+            const sizePercent = (player.radius / 20) * 100;
+            if (sizePercent > 200) {
+                player.color = 'darkred';
+            } else if (sizePercent > 150) {
+                player.color = 'red';
+            } else if (sizePercent > 120) {
+                player.color = 'orange';
+            } else if (sizePercent < 60) {
+                player.color = 'darkgreen';
+            } else if (sizePercent < 80) {
+                player.color = 'green';
+            } else {
+                player.color = 'blue';
+            }
+            
+            if (player.radius > 50) {
+                gameOver();
+            }
+        }
+        
+        // Game over
+        function gameOver() {
+            currentState = GameState.GAME_OVER;
+            
+            if (score > highScore) {
+                highScore = score;
+                levelBestScores[currentLevel.id] = highScore;
+                saveProgress();
+            }
+            
+            document.getElementById('hud').classList.remove('active');
+            document.getElementById('gameOver').classList.add('active');
+            document.getElementById('gameOverScore').textContent = score;
+            document.getElementById('gameOverHighScore').textContent = highScore;
+        }
+        
+        // Level complete
+        function levelComplete() {
+            currentState = GameState.LEVEL_COMPLETE;
+            
+            if (!completedLevels.includes(currentLevel.id)) {
+                completedLevels.push(currentLevel.id);
+            }
+            
+            const nextLevelId = currentLevel.id + 1;
+            if (nextLevelId <= levels.length && !unlockedLevels.includes(nextLevelId)) {
+                unlockedLevels.push(nextLevelId);
+            }
+            
+            if (score > highScore) {
+                highScore = score;
+                levelBestScores[currentLevel.id] = highScore;
+            }
+            
+            saveProgress();
+            
+            const sizePercent = (player.radius / 20) * 100;
+            let stars = 1;
+            if (score > 1000 && sizePercent < 50) {
+                stars = 3;
+            } else if (score > 500 && sizePercent < 80) {
+                stars = 2;
+            }
+            
+            document.getElementById('hud').classList.remove('active');
+            document.getElementById('levelComplete').classList.add('active');
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('finalHighScore').textContent = highScore;
+            
+            const starsElement = document.getElementById('stars');
+            starsElement.innerHTML = '';
+            for (let i = 0; i < 3; i++) {
+                if (i < stars) {
+                    starsElement.innerHTML += '★';
+                } else {
+                    starsElement.innerHTML += '<span class="star-empty">★</span>';
+                }
+            }
+            
+            const nextLevelBtn = document.getElementById('nextLevelBtn');
+            if (currentLevel.id < levels.length) {
+                nextLevelBtn.style.display = 'block';
+            } else {
+                nextLevelBtn.style.display = 'none';
+            }
+            
+            for (let i = 0; i < 50; i++) {
+                particles.push({
+                    x: canvas.width / 2,
+                    y: canvas.height / 2,
+                    vx: (Math.random() - 0.5) * 10,
+                    vy: (Math.random() - 0.5) * 10,
+                    radius: Math.random() * 4 + 2,
+                    color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1'][Math.floor(Math.random() * 4)],
+                    life: 60
+                });
+            }
+        }
+        
+        // Pause game
+        function pauseGame() {
+            if (currentState !== GameState.PLAYING) return;
+            
+            currentState = GameState.PAUSED;
+            document.getElementById('hud').classList.remove('active');
+            document.getElementById('pauseScreen').classList.add('active');
+            
+            document.getElementById('pauseScore').textContent = score;
+            document.getElementById('pauseTime').textContent = Math.ceil(levelTimeRemaining);
+            document.getElementById('pauseLevel').textContent = currentLevel.name;
+        }
+        
+        // Resume game
+        function resumeGame() {
+            if (currentState !== GameState.PAUSED) return;
+            
+            currentState = GameState.PLAYING;
+            document.getElementById('pauseScreen').classList.remove('active');
+            document.getElementById('hud').classList.add('active');
+        }
+        
+        // Go to main menu
+        function goToMainMenu() {
+            currentState = GameState.MENU;
+            
+            document.querySelectorAll('.screen').forEach(screen => {
+                screen.classList.remove('active');
+            });
+            document.getElementById('hud').classList.remove('active');
+            
+            document.getElementById('mainMenu').classList.add('active');
+            
+            renderLevelGrid();
+        }
+        
+        // Next level
+        function nextLevel() {
+            if (currentLevel.id < levels.length) {
+                startLevel(currentLevel.id + 1);
+            }
+        }
+        
+        // Retry level
+        function retryLevel() {
+            startLevel(currentLevel.id);
+        }
+        
+        // REWRITTEN SPAWN FUNCTIONS WITH CONSOLE.LOG DEBUGGING
+        
+        function spawnObstacle() {
+            const spawnX = canvas.width + 50;
+            const height = 30 + Math.random() * 40;
+            
+            console.log("🔴 Spawning obstacle at X:", spawnX, "Height:", height);
+            
+            obstacles.push({
+                x: spawnX,
+                y: canvas.height - 50 - height,
+                width: 30,
+                height: height
+            });
+        }
+        
+        function spawnBird() {
+            const spawnX = canvas.width + 50;
+            
+            // 3 height lanes with proper distribution
+            const rand = Math.random();
+            let laneY;
+            
+            if (rand < 0.3) {
+                laneY = 250 + Math.random() * 50; // 250-300px (low)
+                console.log("🐦 Spawning LOW bird at Y:", laneY);
+            } else if (rand < 0.8) {
+                laneY = 150 + Math.random() * 100; // 150-250px (medium)
+                console.log("🐦 Spawning MEDIUM bird at Y:", laneY);
+            } else {
+                laneY = 80 + Math.random() * 70; // 80-150px (high)
+                console.log("🐦 Spawning HIGH bird at Y:", laneY);
+            }
+            
+            birds.push({
+                x: spawnX,
+                y: laneY,
+                width: 30,
+                height: 20,
+                velocityX: -4 * speedMultiplier,
+                wingPhase: Math.random() * Math.PI * 2
+            });
+        }
+        
+        function spawnPlatform() {
+            const spawnX = canvas.width + 50;
+            
+            // Platform Y position between 150-350px from top (reachable)
+            const platformY = 150 + Math.random() * 200; // 150-350px
+            const platformWidth = 120 + Math.random() * 60; // 120-180px wide
+            
+            console.log("🟫 Spawning platform at X:", spawnX, "Y:", platformY, "Width:", platformWidth);
+            
+            platforms.push({
+                x: spawnX,
+                y: platformY,
+                width: platformWidth,
+                height: 15,
+                breakTimer: 60,
+                cracked: 0
+            });
+        }
+        
+        function spawnCoin() {
+            const spawnX = canvas.width + 50;
+            const spawnY = canvas.height - 80 - Math.random() * 100;
+            
+            console.log("🟡 Spawning coin at X:", spawnX, "Y:", spawnY);
+            
+            coins.push({
+                x: spawnX,
+                y: spawnY,
+                radius: 10
+            });
+        }
+        
+        function spawnGoldenCoin() {
+            const spawnX = canvas.width + 50;
+            const spawnY = 80 + Math.random() * 100; // High position
+            
+            console.log("⭐ Spawning GOLDEN coin at X:", spawnX, "Y:", spawnY);
+            
+            goldenCoins.push({
+                x: spawnX,
+                y: spawnY,
+                radius: 12,
+                sparkleAngle: 0
+            });
+        }
+        
+        function spawnShrinker() {
+            const spawnX = canvas.width + 50;
+            const spawnY = canvas.height - 80 - Math.random() * 100;
+            
+            console.log("🟢 Spawning shrinker at X:", spawnX, "Y:", spawnY);
+            
+            shrinkers.push({
+                x: spawnX,
+                y: spawnY,
+                radius: 15
+            });
+        }
+        
+        function spawnDoubleJump() {
+            const spawnX = canvas.width + 50;
+            const spawnY = canvas.height - 80 - Math.random() * 100;
+            
+            console.log("🟣 Spawning double jump at X:", spawnX, "Y:", spawnY);
+            
+            doubleJumps.push({
+                x: spawnX,
+                y: spawnY,
+                radius: 15
+            });
+        }
+        
+        function spawnIceShield() {
+            const spawnX = canvas.width + 50;
+            const spawnY = canvas.height - 80 - Math.random() * 100;
+            
+            console.log("🔵 Spawning ice shield at X:", spawnX, "Y:", spawnY);
+            
+            iceShields.push({
+                x: spawnX,
+                y: spawnY,
+                radius: 15
+            });
+        }
+        
+        // Update game
+        function update(deltaTime) {
+            if (currentState !== GameState.PLAYING) return;
+            
+            gameTime += deltaTime;
+            
+            // Update level timer
+            levelTimeRemaining -= deltaTime / 1000;
+            if (levelTimeRemaining <= 0) {
+                levelComplete();
+                return;
+            }
+            
+            // Update UI
+            document.getElementById('timer').textContent = Math.ceil(levelTimeRemaining) + 's';
+            document.getElementById('progressFill').style.width = 
+                ((levelTimeRemaining / currentLevel.targetTime) * 100) + '%';
+            
+            // Update hit animation timer
+            if (player.hitAnimationTimer > 0) {
+                player.hitAnimationTimer -= deltaTime / 1000;
+                if (player.hitAnimationTimer <= 0) {
+                    player.hitAnimationTimer = 0;
+                    player.faceState = 'normal';
+                }
+            }
+            
+            // Update screen shake
+            if (shakeTimer > 0) {
+                shakeTimer -= deltaTime / 1000;
+                shakeIntensity *= 0.9;
+                
+                if (shakeTimer <= 0) {
+                    shakeTimer = 0;
+                    shakeIntensity = 0;
+                }
+            }
+            
+            // Update player
+            player.velocityY += 0.8;
+            player.y += player.velocityY;
+            
+            // Ground collision
+            if (player.y >= canvas.height - 50 - player.radius) {
+                player.y = canvas.height - 50 - player.radius;
+                player.velocityY = 0;
+                player.jumping = false;
+                player.doubleJumpAvailable = true;
+            }
+            
+            // Update invincibility
+            if (player.invincible) {
+                player.invincibleTimer--;
+                if (player.invincibleTimer <= 0) {
+                    player.invincible = false;
+                }
+            }
+            
+            // Update ouch timer
+            if (player.ouchTimer > 0) {
+                player.ouchTimer--;
+                if (player.ouchTimer <= 0) {
+                    player.faceState = 'normal';
+                }
+            }
+            
+            // Update double jump timer
+            if (player.hasDoubleJump) {
+                player.doubleJumpTimer--;
+                if (player.doubleJumpTimer <= 0) {
+                    player.hasDoubleJump = false;
+                }
+            }
+            
+            // Update ice shield timer
+            if (player.hasIceShield) {
+                player.iceShieldTimer--;
+                if (player.iceShieldTimer <= 0) {
+                    player.hasIceShield = false;
+                }
+            }
+            
+            // Update speed multiplier
+            speedMultiplier += currentLevel.speedGrowthRate * deltaTime / 1000;
+            if (speedMultiplier > 3) speedMultiplier = 3;
+            
+            // Update UI
+            document.getElementById('score').textContent = score;
+            document.getElementById('size').textContent = Math.round((player.radius / 20) * 100);
+            document.getElementById('speed').textContent = speedMultiplier.toFixed(1);
+            
+            // SIMPLE SPAWN TIMING - accumulate deltaTime
+            
+            // Spawn obstacles every 2-4 seconds (level dependent)
+            obstacleSpawnTimer += deltaTime;
+            const obstacleInterval = currentLevel.obstacleInterval[0] + 
+                Math.random() * (currentLevel.obstacleInterval[1] - currentLevel.obstacleInterval[0]);
+            if (obstacleSpawnTimer >= obstacleInterval) {
+                spawnObstacle();
+                obstacleSpawnTimer = 0;
+            }
+            
+            // Spawn birds every 5-10 seconds (level dependent), not in first 10 seconds
+            birdSpawnTimer += deltaTime;
+            const birdInterval = currentLevel.birdInterval[0] + 
+                Math.random() * (currentLevel.birdInterval[1] - currentLevel.birdInterval[0]);
+            if (birdSpawnTimer >= birdInterval && gameTime > 10000) {
+                spawnBird();
+                birdSpawnTimer = 0;
+            }
+            
+            // Spawn platforms every 3-5 seconds
+            platformSpawnTimer += deltaTime;
+            const platformInterval = currentLevel.platformInterval[0] + 
+                Math.random() * (currentLevel.platformInterval[1] - currentLevel.platformInterval[0]);
+            if (platformSpawnTimer >= platformInterval) {
+                spawnPlatform();
+                platformSpawnTimer = 0;
+            }
+            
+            // Spawn coins every 2-3 seconds
+            coinSpawnTimer += deltaTime;
+            const coinInterval = currentLevel.coinInterval[0] + 
+                Math.random() * (currentLevel.coinInterval[1] - currentLevel.coinInterval[0]);
+            if (coinSpawnTimer >= coinInterval) {
+                spawnCoin();
+                coinSpawnTimer = 0;
+            }
+            
+            // Spawn golden coins every 5-8 seconds
+            goldenCoinSpawnTimer += deltaTime;
+            const goldenCoinInterval = currentLevel.goldenCoinInterval[0] + 
+                Math.random() * (currentLevel.goldenCoinInterval[1] - currentLevel.goldenCoinInterval[0]);
+            if (goldenCoinSpawnTimer >= goldenCoinInterval) {
+                spawnGoldenCoin();
+                goldenCoinSpawnTimer = 0;
+            }
+            
+            // Spawn shrinkers every 15-20 seconds
+            shrinkerSpawnTimer += deltaTime;
+            const shrinkerInterval = currentLevel.shrinkerInterval[0] + 
+                Math.random() * (currentLevel.shrinkerInterval[1] - currentLevel.shrinkerInterval[0]);
+            if (shrinkerSpawnTimer >= shrinkerInterval) {
+                spawnShrinker();
+                shrinkerSpawnTimer = 0;
+            }
+            
+            // Spawn ice shields every 20-25 seconds
+            iceShieldSpawnTimer += deltaTime;
+            const iceShieldInterval = currentLevel.iceShieldInterval[0] + 
+                Math.random() * (currentLevel.iceShieldInterval[1] - currentLevel.iceShieldInterval[0]);
+            if (iceShieldSpawnTimer >= iceShieldInterval) {
+                spawnIceShield();
+                iceShieldSpawnTimer = 0;
+            }
+            
+            // Spawn double jumps every 25-30 seconds (after 20 seconds)
+            doubleJumpSpawnTimer += deltaTime;
+            const doubleJumpInterval = currentLevel.doubleJumpInterval[0] + 
+                Math.random() * (currentLevel.doubleJumpInterval[1] - currentLevel.doubleJumpInterval[0]);
+            if (doubleJumpSpawnTimer >= doubleJumpInterval && gameTime > 20000) {
+                spawnDoubleJump();
+                doubleJumpSpawnTimer = 0;
+            }
+            
+            // Update obstacles
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                obstacles[i].x -= 5 * speedMultiplier;
+                
+                // Check collision
+                if (player.x + player.radius > obstacles[i].x &&
+                    player.x - player.radius < obstacles[i].x + obstacles[i].width &&
+                    player.y + player.radius > obstacles[i].y &&
+                    player.y - player.radius < obstacles[i].y + obstacles[i].height) {
+                    
+                    handlePlayerHit(true);
+                    obstacles.splice(i, 1);
+                    continue;
+                }
+                
+                if (obstacles[i].x + obstacles[i].width < 0) {
+                    obstacles.splice(i, 1);
+                }
+            }
+            
+            // Update birds
+            for (let i = birds.length - 1; i >= 0; i--) {
+                birds[i].x += birds[i].velocityX;
+                birds[i].wingPhase += 0.2;
+                
+                // Check collision
+                if (player.x + player.radius > birds[i].x &&
+                    player.x - player.radius < birds[i].x + birds[i].width &&
+                    player.y + player.radius > birds[i].y &&
+                    player.y - player.radius < birds[i].y + birds[i].height) {
+                    
+                    handlePlayerHit(true);
+                    birds.splice(i, 1);
+                    continue;
+                }
+                
+                if (birds[i].x + birds[i].width < 0) {
+                    birds.splice(i, 1);
+                }
+            }
+            
+            // Update shrinkers
+            for (let i = shrinkers.length - 1; i >= 0; i--) {
+                shrinkers[i].x -= 5 * speedMultiplier;
+                
+                const dx = player.x - shrinkers[i].x;
+                const dy = player.y - shrinkers[i].y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < player.radius + shrinkers[i].radius) {
+                    handlePlayerHit(false);
+                    score += 5;
+                    shrinkers.splice(i, 1);
+                    continue;
+                }
+                
+                if (shrinkers[i].x + shrinkers[i].radius < 0) {
+                    shrinkers.splice(i, 1);
+                }
+            }
+            
+            // Update coins
+            for (let i = coins.length - 1; i >= 0; i--) {
+                coins[i].x -= 5 * speedMultiplier;
+                
+                const dx = player.x - coins[i].x;
+                const dy = player.y - coins[i].y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < player.radius + coins[i].radius) {
+                    score += 10;
+                    coins.splice(i, 1);
+                    continue;
+                }
+                
+                if (coins[i].x + coins[i].radius < 0) {
+                    coins.splice(i, 1);
+                }
+            }
+            
+            // Update golden coins
+            for (let i = goldenCoins.length - 1; i >= 0; i--) {
+                goldenCoins[i].x -= 5 * speedMultiplier;
+                goldenCoins[i].sparkleAngle += 0.2;
+                
+                const dx = player.x - goldenCoins[i].x;
+                const dy = player.y - goldenCoins[i].y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < player.radius + goldenCoins[i].radius) {
+                    score += 25;
+                    goldenCoins.splice(i, 1);
+                    continue;
+                }
+                
+                if (goldenCoins[i].x + goldenCoins[i].radius < 0) {
+                    goldenCoins.splice(i, 1);
+                }
+            }
+            
+            // Update double jumps
+            for (let i = doubleJumps.length - 1; i >= 0; i--) {
+                doubleJumps[i].x -= 5 * speedMultiplier;
+                
+                const dx = player.x - doubleJumps[i].x;
+                const dy = player.y - doubleJumps[i].y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < player.radius + doubleJumps[i].radius) {
+                    player.hasDoubleJump = true;
+                    player.doubleJumpTimer = 900;
+                    doubleJumps.splice(i, 1);
+                    continue;
+                }
+                
+                if (doubleJumps[i].x + doubleJumps[i].radius < 0) {
+                    doubleJumps.splice(i, 1);
+                }
+            }
+            
+            // Update ice shields
+            for (let i = iceShields.length - 1; i >= 0; i--) {
+                iceShields[i].x -= 5 * speedMultiplier;
+                
+                const dx = player.x - iceShields[i].x;
+                const dy = player.y - iceShields[i].y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < player.radius + iceShields[i].radius) {
+                    player.hasIceShield = true;
+                    player.iceShieldTimer = 600;
+                    iceShields.splice(i, 1);
+                    continue;
+                }
+                
+                if (iceShields[i].x + iceShields[i].radius < 0) {
+                    iceShields.splice(i, 1);
+                }
+            }
+            
+            // Update platforms
+            for (let i = platforms.length - 1; i >= 0; i--) {
+                platforms[i].x -= 5 * speedMultiplier;
+                
+                if (player.x + player.radius > platforms[i].x &&
+                    player.x - player.radius < platforms[i].x + platforms[i].width &&
+                    player.y + player.radius >= platforms[i].y &&
+                    player.y + player.radius <= platforms[i].y + 10 &&
+                    player.velocityY >= 0) {
+                    
+                    player.y = platforms[i].y - player.radius;
+                    player.velocityY = 0;
+                    player.jumping = false;
+                    player.doubleJumpAvailable = true;
+                    
+                    platforms[i].breakTimer--;
+                    
+                    if (platforms[i].breakTimer <= 40 && platforms[i].cracked < 1) {
+                        platforms[i].cracked = 1;
+                    } else if (platforms[i].breakTimer <= 20 && platforms[i].cracked < 2) {
+                        platforms[i].cracked = 2;
+                    }
+                    
+                    if (platforms[i].breakTimer <= 0) {
+                        platforms.splice(i, 1);
+                        continue;
+                    }
+                }
+                
+                if (platforms[i].x + platforms[i].width < 0) {
+                    platforms.splice(i, 1);
+                }
+            }
+            
+            // Update particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                particles[i].x += particles[i].vx;
+                particles[i].y += particles[i].vy;
+                particles[i].life--;
+                
+                if (particles[i].life <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+        }
+        
+        // Draw game
+        function draw() {
+            ctx.fillStyle = currentLevel ? currentLevel.background : '#87CEEB';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.save();
+            if (shakeTimer > 0) {
+                const offsetX = (Math.random() - 0.5) * shakeIntensity * 2;
+                const offsetY = (Math.random() - 0.5) * shakeIntensity * 2;
+                ctx.translate(offsetX, offsetY);
+            }
+            
+            ctx.fillStyle = currentLevel ? currentLevel.groundColor : '#228B22';
+            ctx.fillRect(0, canvas.height - 50, canvas.width, 50);
+            
+            platforms.forEach(platform => {
+                ctx.fillStyle = '#8B4513';
+                ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+                
+                if (platform.cracked >= 1) {
+                    ctx.strokeStyle = '#000';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(platform.x + platform.width * 0.3, platform.y);
+                    ctx.lineTo(platform.x + platform.width * 0.35, platform.y + platform.height);
+                    ctx.stroke();
+                }
+                if (platform.cracked >= 2) {
+                    ctx.beginPath();
+                    ctx.moveTo(platform.x + platform.width * 0.7, platform.y);
+                    ctx.lineTo(platform.x + platform.width * 0.65, platform.y + platform.height);
+                    ctx.stroke();
+                }
+            });
+            
+            obstacles.forEach(obstacle => {
+                ctx.fillStyle = '#FF0000';
+                ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+                
+                ctx.fillStyle = '#CC0000';
+                ctx.beginPath();
+                ctx.moveTo(obstacle.x, obstacle.y);
+                ctx.lineTo(obstacle.x + obstacle.width / 2, obstacle.y - 10);
+                ctx.lineTo(obstacle.x + obstacle.width, obstacle.y);
+                ctx.closePath();
+                ctx.fill();
+            });
+            
+            birds.forEach(bird => {
+                ctx.save();
+                ctx.translate(bird.x + bird.width / 2, bird.y + bird.height / 2);
+                
+                ctx.fillStyle = '#8B0000';
+                ctx.beginPath();
+                ctx.moveTo(0, -bird.height / 2);
+                ctx.lineTo(bird.width / 2, 0);
+                ctx.lineTo(0, bird.height / 2);
+                ctx.lineTo(-bird.width / 2, 0);
+                ctx.closePath();
+                ctx.fill();
+                
+                const wingOffset = Math.sin(bird.wingPhase) * 5;
+                ctx.fillStyle = '#A52A2A';
+                ctx.beginPath();
+                ctx.moveTo(-bird.width / 3, 0);
+                ctx.lineTo(-bird.width / 2 - 5, -wingOffset);
+                ctx.lineTo(-bird.width / 3, bird.height / 4);
+                ctx.closePath();
+                ctx.fill();
+                
+                ctx.beginPath();
+                ctx.moveTo(bird.width / 3, 0);
+                ctx.lineTo(bird.width / 2 + 5, -wingOffset);
+                ctx.lineTo(bird.width / 3, bird.height / 4);
+                ctx.closePath();
+                ctx.fill();
+                
+                ctx.restore();
+            });
+            
+            shrinkers.forEach(shrinker => {
+                ctx.fillStyle = '#00FF00';
+                ctx.beginPath();
+                ctx.arc(shrinker.x, shrinker.y, shrinker.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = '#000';
+                ctx.fillRect(shrinker.x - 8, shrinker.y - 2, 16, 4);
+            });
+            
+            coins.forEach(coin => {
+                ctx.fillStyle = '#FFD700';
+                ctx.beginPath();
+                ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = '#000';
+                ctx.font = 'bold 12px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('$', coin.x, coin.y);
+            });
+            
+            goldenCoins.forEach(coin => {
+                ctx.fillStyle = '#FFA500';
+                ctx.beginPath();
+                ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = '#FFD700';
+                ctx.font = 'bold 14px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('★', coin.x, coin.y);
+                
+                for (let i = 0; i < 3; i++) {
+                    const angle = coin.sparkleAngle + (Math.PI * 2 / 3) * i;
+                    const sparkleX = coin.x + Math.cos(angle) * (coin.radius + 5);
+                    const sparkleY = coin.y + Math.sin(angle) * (coin.radius + 5);
+                    
+                    ctx.fillStyle = '#FFF';
+                    ctx.beginPath();
+                    ctx.arc(sparkleX, sparkleY, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+            
+            doubleJumps.forEach(dj => {
+                ctx.fillStyle = '#9932CC';
+                ctx.beginPath();
+                ctx.arc(dj.x, dj.y, dj.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = '#FFF';
+                ctx.font = 'bold 12px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('2x', dj.x, dj.y);
+            });
+            
+            iceShields.forEach(shield => {
+                ctx.fillStyle = '#00FFFF';
+                ctx.beginPath();
+                ctx.arc(shield.x, shield.y, shield.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.strokeStyle = '#FFF';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                for (let i = 0; i < 6; i++) {
+                    const angle = (Math.PI / 3) * i;
+                    const x = shield.x + Math.cos(angle) * shield.radius * 0.6;
+                    const y = shield.y + Math.sin(angle) * shield.radius * 0.6;
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.closePath();
+                ctx.stroke();
+            });
+            
+            ctx.save();
+            
+            if (player.hasIceShield) {
+                ctx.strokeStyle = '#00FFFF';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, player.radius + 5, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            
+            if (player.hasDoubleJump) {
+                ctx.strokeStyle = '#9932CC';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, player.radius + 8, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            
+            if (player.hitAnimationTimer > 0) {
+                const flashIntensity = player.hitAnimationTimer / 0.8;
+                ctx.fillStyle = `rgba(255, ${Math.floor(100 * flashIntensity)}, ${Math.floor(100 * flashIntensity)}, 0.3)`;
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, player.radius + 10, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            ctx.fillStyle = player.color;
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            if (player.hitAnimationTimer > 0) {
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 3;
+                
+                ctx.beginPath();
+                ctx.moveTo(player.x - player.radius * 0.5, player.y - player.radius * 0.3);
+                ctx.lineTo(player.x - player.radius * 0.3, player.y - player.radius * 0.15);
+                ctx.lineTo(player.x - player.radius * 0.5, player.y);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(player.x + player.radius * 0.5, player.y - player.radius * 0.3);
+                ctx.lineTo(player.x + player.radius * 0.3, player.y - player.radius * 0.15);
+                ctx.lineTo(player.x + player.radius * 0.5, player.y);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.arc(player.x, player.y + player.radius * 0.3, player.radius * 0.2, 0, Math.PI * 2);
+                ctx.fillStyle = '#000';
+                ctx.fill();
+            } else {
+                ctx.fillStyle = '#000';
+                ctx.beginPath();
+                ctx.arc(player.x - player.radius * 0.3, player.y - player.radius * 0.2, player.radius * 0.08, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.beginPath();
+                ctx.arc(player.x + player.radius * 0.3, player.y - player.radius * 0.2, player.radius * 0.08, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(player.x, player.y + player.radius * 0.1, player.radius * 0.25, 0.2 * Math.PI, 0.8 * Math.PI);
+                ctx.stroke();
+            }
+            
+            ctx.restore();
+            
+            particles.forEach(particle => {
+                ctx.globalAlpha = particle.life / 60;
+                
+                if (particle.text) {
+                    ctx.fillStyle = particle.color;
+                    ctx.font = 'bold 20px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(particle.text, particle.x, particle.y);
+                } else {
+                    ctx.fillStyle = particle.color;
+                    ctx.beginPath();
+                    ctx.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                ctx.globalAlpha = 1;
+            });
+            
+            ctx.restore();
+        }
+        
+        // Game loop
+        function gameLoop(timestamp) {
+            if (!lastTime) lastTime = timestamp;
+            const deltaTime = timestamp - lastTime;
+            lastTime = timestamp;
+            
+            update(deltaTime);
+            draw();
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Setup event listeners
+        function setupEventListeners() {
+            document.addEventListener('keydown', (e) => {
+                if (e.code === 'Space' || e.code === 'ArrowUp') {
+                    e.preventDefault();
+                    if (currentState === GameState.PLAYING) {
+                        jump();
+                    }
+                } else if (e.code === 'KeyP' || e.code === 'Escape') {
+                    if (currentState === GameState.PLAYING) {
+                        pauseGame();
+                    } else if (currentState === GameState.PAUSED) {
+                        resumeGame();
+                    }
+                }
+            });
+            
+            canvas.addEventListener('click', () => {
+                if (currentState === GameState.PLAYING) {
+                    jump();
+                }
+            });
+            
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if (currentState === GameState.PLAYING) {
+                    jump();
+                }
+            });
+            
+            document.getElementById('nextLevelBtn').addEventListener('click', nextLevel);
+            document.getElementById('menuBtn1').addEventListener('click', goToMainMenu);
+            document.getElementById('retryBtn').addEventListener('click', retryLevel);
+            document.getElementById('menuBtn2').addEventListener('click', goToMainMenu);
+            document.getElementById('resumeBtn').addEventListener('click', resumeGame);
+            document.getElementById('menuBtn3').addEventListener('click', goToMainMenu);
+        }
+        
+        // Initialize game
+        init();
+    </script>
+</body>
+</html>
