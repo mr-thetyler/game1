@@ -1,18 +1,21 @@
 import { useEffect, useRef, useCallback } from 'react';
 
 /**
- * Hero Runner - HTML5 Canvas Game (Enhanced Edition)
+ * Hero Runner - HTML5 Canvas Game (Enhanced Edition v3)
  * 
  * Features:
  * - Blue circle hero with gravity & jump (Space/Click)
  * - Red obstacles: hero grows +15%, screen shake, invincibility frames
  * - Green shrinkers: hero shrinks -20%, +5 score
  * - Yellow coins: +10 score with floating text
+ * - GOLD coins (high-altitude): +25 score, need platforms to reach
+ * - PURPLE double-jump power-up: 15s of mid-air second jump
+ * - PLATFORMS: brown wooden platforms hero can stand on, break after 1s
  * - Game Over when radius >= 120px
- * - Fast difficulty scaling (speed +4% every 3s, obstacles ramp up)
+ * - Continuous difficulty scaling (speed +4% every 3s, capped at 3x)
  * - Pause system (P/Esc)
  * - Local high score (localStorage)
- * - Survival timer, screen shake, speed-up indicator
+ * - Survival timer, screen shake, invincibility frames
  */
 
 // ==================== CONSTANTS ====================
@@ -27,11 +30,21 @@ const BASE_SCROLL_SPEED = 3;
 const LINE_SPACING = 80;
 const MAX_RADIUS = 120;
 const HITBOX_SHRINK = 0.9;
-const SPEED_CAP_MULTIPLIER = 3; // Max 3x starting speed
-const INVINCIBILITY_DURATION = 30; // 0.5 seconds at 60fps
-const SCREEN_SHAKE_DURATION = 12; // 0.2 seconds at 60fps
-const SPEED_UP_DISPLAY = 60; // 1 second at 60fps
+const SPEED_CAP_MULTIPLIER = 3;
+const INVINCIBILITY_DURATION = 30; // 0.5s at 60fps
+const SCREEN_SHAKE_DURATION = 12; // 0.2s at 60fps
 const HIGH_SCORE_KEY = 'heroRunnerHighScore';
+
+// Platform constants
+const PLATFORM_BREAK_TIME = 60; // 1 second at 60fps
+const PLATFORM_CRACK_START = 36; // Start cracking at 0.6s
+
+// Double jump constants
+const DOUBLE_JUMP_DURATION = 900; // 15 seconds at 60fps
+const DOUBLE_JUMP_SPAWN_MIN = 900; // 15 seconds
+const DOUBLE_JUMP_SPAWN_MAX = 1200; // 20 seconds
+const DOUBLE_JUMP_FIRST_DELAY = 1200; // Wait 20s before first spawn
+const DOUBLE_JUMP_FORCE = -11; // Slightly weaker than normal jump
 
 // ==================== TYPES ====================
 interface Obstacle {
@@ -39,21 +52,30 @@ interface Obstacle {
   y: number;
   width: number;
   height: number;
-  type: 'short' | 'tall';
 }
 
 interface Coin {
   x: number;
   y: number;
   radius: number;
-  collected: boolean;
+  type: 'normal' | 'high' | 'doubleJump';
+  sparklePhase: number;
 }
 
 interface Shrinker {
   x: number;
   y: number;
   radius: number;
-  collected: boolean;
+}
+
+interface Platform {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  standTimer: number; // How long hero has been standing on it
+  breaking: boolean;
+  crackLevel: number; // 0-3 crack visual intensity
 }
 
 interface FloatingText {
@@ -76,6 +98,14 @@ interface Particle {
   life: number;
 }
 
+interface SpeedLine {
+  x: number;
+  y: number;
+  length: number;
+  speed: number;
+  alpha: number;
+}
+
 interface GameState {
   // Hero
   heroY: number;
@@ -83,6 +113,14 @@ interface GameState {
   isGrounded: boolean;
   heroRadius: number;
   maxRadiusReached: number;
+  onPlatform: Platform | null; // Platform hero is currently standing on
+
+  // Double jump
+  doubleJumpActive: boolean;
+  doubleJumpTimer: number;
+  hasDoubleJumped: boolean; // Used for current airtime
+  doubleJumpSpawnTimer: number;
+  doubleJumpReadyTimer: number; // Shows "DOUBLE JUMP READY" text
 
   // Scrolling
   scrollOffset: number;
@@ -93,23 +131,27 @@ interface GameState {
   obstacles: Obstacle[];
   coins: Coin[];
   shrinkers: Shrinker[];
+  platforms: Platform[];
   floatingTexts: FloatingText[];
   particles: Particle[];
+  speedLines: SpeedLine[];
 
   // Score
   score: number;
   highScore: number;
   isNewRecord: boolean;
 
-  // Timers (in frames)
+  // Timers
   obstacleTimer: number;
   obstacleInterval: number;
   coinTimer: number;
   coinInterval: number;
   shrinkerTimer: number;
   shrinkerInterval: number;
+  platformTimer: number;
+  platformInterval: number;
 
-  // Difficulty scaling
+  // Difficulty scaling - continuous
   speedTimer: number;
   spawnRateTimer: number;
   minObstacleInterval: number;
@@ -122,13 +164,12 @@ interface GameState {
   screenShakeTimer: number;
   screenShakeX: number;
   screenShakeY: number;
-  speedUpTimer: number;
 
   // Invincibility
   invincibilityTimer: number;
 
   // Survival timer
-  survivalTime: number; // in frames
+  survivalTime: number;
 
   // Pause
   isPaused: boolean;
@@ -149,6 +190,13 @@ function createInitialState(): GameState {
     isGrounded: true,
     heroRadius: INITIAL_RADIUS,
     maxRadiusReached: INITIAL_RADIUS,
+    onPlatform: null,
+
+    doubleJumpActive: false,
+    doubleJumpTimer: 0,
+    hasDoubleJumped: false,
+    doubleJumpSpawnTimer: 0,
+    doubleJumpReadyTimer: 0,
 
     scrollOffset: 0,
     scrollSpeed: BASE_SCROLL_SPEED,
@@ -157,23 +205,27 @@ function createInitialState(): GameState {
     obstacles: [],
     coins: [],
     shrinkers: [],
+    platforms: [],
     floatingTexts: [],
     particles: [],
+    speedLines: [],
 
     score: 0,
     highScore: highScore,
     isNewRecord: false,
 
     obstacleTimer: 0,
-    obstacleInterval: randomRange(90, 150), // 1.5-2.5 seconds
+    obstacleInterval: randomRange(90, 150),
     coinTimer: 0,
     coinInterval: randomRange(45, 90),
     shrinkerTimer: 0,
-    shrinkerInterval: randomRange(480, 720), // 8-12 seconds
+    shrinkerInterval: randomRange(480, 720),
+    platformTimer: 0,
+    platformInterval: randomRange(120, 240),
 
     speedTimer: 0,
     spawnRateTimer: 0,
-    minObstacleInterval: 90, // 1.5 seconds minimum
+    minObstacleInterval: 90,
 
     flashTimer: 0,
     squishTimer: 0,
@@ -182,7 +234,6 @@ function createInitialState(): GameState {
     screenShakeTimer: 0,
     screenShakeX: 0,
     screenShakeY: 0,
-    speedUpTimer: 0,
 
     invincibilityTimer: 0,
 
@@ -215,8 +266,7 @@ function circleCircleCollision(
 ): boolean {
   const dx = x1 - x2;
   const dy = y1 - y2;
-  const distance = Math.sqrt(dx * dx + dy * dy);
-  return distance < (r1 + r2);
+  return Math.sqrt(dx * dx + dy * dy) < (r1 + r2);
 }
 
 function formatTime(frames: number): string {
@@ -236,43 +286,81 @@ function spawnObstacle(state: GameState): void {
   state.obstacles.push({
     x: CANVAS_WIDTH + 20,
     y: GROUND_Y - height,
-    width: width,
-    height: height,
-    type: isTall ? 'tall' : 'short',
+    width,
+    height,
   });
 }
 
 function spawnCoin(state: GameState): void {
-  const isAirborne = Math.random() > 0.4;
-  const y = isAirborne
-    ? randomRange(GROUND_Y - 150, GROUND_Y - 80)
-    : GROUND_Y - 20;
+  // 20% chance of high-altitude coin (needs platforms)
+  const isHigh = Math.random() < 0.2;
+  const y = isHigh
+    ? randomRange(40, GROUND_Y - 200) // High up, needs platform
+    : randomRange(GROUND_Y - 150, GROUND_Y - 20);
 
   state.coins.push({
     x: CANVAS_WIDTH + 20,
-    y: y,
-    radius: 12,
-    collected: false,
+    y,
+    radius: isHigh ? 14 : 12,
+    type: isHigh ? 'high' : 'normal',
+    sparklePhase: Math.random() * Math.PI * 2,
   });
 }
 
 function spawnShrinker(state: GameState): void {
   const y = randomRange(GROUND_Y - 180, GROUND_Y - 60);
+  state.shrinkers.push({ x: CANVAS_WIDTH + 20, y, radius: 15 });
+}
 
-  state.shrinkers.push({
+/** Spawn a platform at varying heights */
+function spawnPlatform(state: GameState): void {
+  // Different height tiers
+  const tier = Math.random();
+  let y: number;
+  if (tier < 0.4) {
+    // Low platform (easy jump from ground)
+    y = GROUND_Y - randomRange(60, 90);
+  } else if (tier < 0.75) {
+    // Medium platform
+    y = GROUND_Y - randomRange(110, 160);
+  } else {
+    // High platform (needs platform hopping or perfect timing)
+    y = GROUND_Y - randomRange(180, 230);
+  }
+
+  const width = randomRange(70, 120);
+  const height = 14;
+
+  state.platforms.push({
     x: CANVAS_WIDTH + 20,
-    y: y,
-    radius: 15,
-    collected: false,
+    y,
+    width,
+    height,
+    standTimer: 0,
+    breaking: false,
+    crackLevel: 0,
+  });
+}
+
+/** Spawn double jump power-up (purple coin) - only after 20s */
+function spawnDoubleJumpPowerUp(state: GameState): void {
+  // Only spawn if game has been running for at least 20 seconds
+  if (state.survivalTime < DOUBLE_JUMP_FIRST_DELAY) return;
+  // Don't spawn if already active
+  if (state.doubleJumpActive) return;
+
+  const y = randomRange(GROUND_Y - 180, GROUND_Y - 80);
+  state.coins.push({
+    x: CANVAS_WIDTH + 20,
+    y,
+    radius: 16,
+    type: 'doubleJump',
+    sparklePhase: 0,
   });
 }
 
 function addFloatingText(state: GameState, x: number, y: number, text: string, color: string): void {
-  state.floatingTexts.push({
-    x, y, text, color,
-    alpha: 1.0,
-    velocityY: -2,
-  });
+  state.floatingTexts.push({ x, y, text, color, alpha: 1.0, velocityY: -2 });
 }
 
 function addParticles(state: GameState, x: number, y: number, color: string, count: number): void {
@@ -284,11 +372,22 @@ function addParticles(state: GameState, x: number, y: number, color: string, cou
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
       radius: randomRange(2, 5),
-      color: color,
+      color,
       alpha: 1.0,
       life: randomRange(20, 40),
     });
   }
+}
+
+/** Add speed lines for subtle speed increase feedback */
+function addSpeedLine(state: GameState): void {
+  state.speedLines.push({
+    x: CANVAS_WIDTH + 10,
+    y: randomRange(20, GROUND_Y - 20),
+    length: randomRange(20, 60),
+    speed: state.scrollSpeed * randomRange(2, 4),
+    alpha: 0.4 + Math.random() * 0.3,
+  });
 }
 
 // ==================== COLLISION DETECTION ====================
@@ -300,43 +399,27 @@ function checkCollisions(state: GameState): void {
   if (state.invincibilityTimer <= 0) {
     for (let i = state.obstacles.length - 1; i >= 0; i--) {
       const obs = state.obstacles[i];
-      if (circleRectCollision(
-        HERO_X, state.heroY, heroR,
-        obs.x, obs.y, obs.width, obs.height
-      )) {
-        // Hero grows 15%
+      if (circleRectCollision(HERO_X, state.heroY, heroR, obs.x, obs.y, obs.width, obs.height)) {
         state.heroRadius *= 1.15;
-        if (state.heroRadius > state.maxRadiusReached) {
-          state.maxRadiusReached = state.heroRadius;
-        }
+        if (state.heroRadius > state.maxRadiusReached) state.maxRadiusReached = state.heroRadius;
 
-        // Visual effects
         state.flashTimer = 15;
         state.squishTimer = 12;
-
-        // Screen shake
         state.screenShakeTimer = SCREEN_SHAKE_DURATION;
-
-        // Invincibility frames
         state.invincibilityTimer = INVINCIBILITY_DURATION;
 
-        // Particles
         addParticles(state, obs.x + obs.width / 2, obs.y + obs.height / 2, '#ff4444', 8);
-
-        // Remove obstacle
         state.obstacles.splice(i, 1);
 
-        // Check game over
         if (state.heroRadius >= MAX_RADIUS) {
           state.isGameOver = true;
-          // Save high score
           if (state.score > state.highScore) {
             state.highScore = state.score;
             state.isNewRecord = true;
             localStorage.setItem(HIGH_SCORE_KEY, state.score.toString());
           }
         }
-        break; // Only hit one obstacle per frame
+        break;
       }
     }
   }
@@ -344,14 +427,26 @@ function checkCollisions(state: GameState): void {
   // Coin collisions
   for (let i = state.coins.length - 1; i >= 0; i--) {
     const coin = state.coins[i];
-    if (!coin.collected && circleCircleCollision(
-      HERO_X, state.heroY, heroR,
-      coin.x, coin.y, coin.radius * HITBOX_SHRINK
-    )) {
-      coin.collected = true;
-      state.score += 10;
-      addFloatingText(state, coin.x, coin.y - 20, '+10', '#f59e0b');
-      addParticles(state, coin.x, coin.y, '#fbbf24', 6);
+    if (circleCircleCollision(HERO_X, state.heroY, heroR, coin.x, coin.y, coin.radius * HITBOX_SHRINK)) {
+      if (coin.type === 'doubleJump') {
+        // Activate double jump power-up
+        state.doubleJumpActive = true;
+        state.doubleJumpTimer = DOUBLE_JUMP_DURATION;
+        state.hasDoubleJumped = false;
+        state.doubleJumpReadyTimer = 120; // Show text for 2 seconds
+        addFloatingText(state, coin.x, coin.y - 20, '2x JUMP!', '#a855f7');
+        addParticles(state, coin.x, coin.y, '#c084fc', 12);
+      } else if (coin.type === 'high') {
+        // High-altitude coin worth +25
+        state.score += 25;
+        addFloatingText(state, coin.x, coin.y - 20, '+25', '#fbbf24');
+        addParticles(state, coin.x, coin.y, '#fcd34d', 10);
+      } else {
+        // Normal coin worth +10
+        state.score += 10;
+        addFloatingText(state, coin.x, coin.y - 20, '+10', '#f59e0b');
+        addParticles(state, coin.x, coin.y, '#fbbf24', 6);
+      }
       state.coins.splice(i, 1);
     }
   }
@@ -359,21 +454,48 @@ function checkCollisions(state: GameState): void {
   // Shrinker collisions
   for (let i = state.shrinkers.length - 1; i >= 0; i--) {
     const shrinker = state.shrinkers[i];
-    if (!shrinker.collected && circleCircleCollision(
-      HERO_X, state.heroY, heroR,
-      shrinker.x, shrinker.y, shrinker.radius * HITBOX_SHRINK
-    )) {
-      shrinker.collected = true;
+    if (circleCircleCollision(HERO_X, state.heroY, heroR, shrinker.x, shrinker.y, shrinker.radius * HITBOX_SHRINK)) {
       state.heroRadius *= 0.8;
-      if (state.heroRadius < INITIAL_RADIUS) {
-        state.heroRadius = INITIAL_RADIUS;
-      }
+      if (state.heroRadius < INITIAL_RADIUS) state.heroRadius = INITIAL_RADIUS;
       state.score += 5;
       addFloatingText(state, shrinker.x, shrinker.y - 20, '+5', '#10b981');
       addParticles(state, shrinker.x, shrinker.y, '#34d399', 10);
       state.shrinkers.splice(i, 1);
     }
   }
+}
+
+// ==================== PLATFORM COLLISION ====================
+
+/**
+ * Check if hero should land on a platform.
+ * Only lands from above (hero falling, hero bottom near platform top).
+ * Returns the platform if hero lands on it, null otherwise.
+ */
+function checkPlatformLanding(state: GameState): Platform | null {
+  // Only land if falling
+  if (state.velocityY <= 0) return null;
+
+  const heroBottom = state.heroY + state.heroRadius;
+  const heroPrevBottom = heroBottom - state.velocityY; // Where hero was last frame
+
+  for (const platform of state.platforms) {
+    if (platform.breaking && platform.crackLevel >= 3) continue; // Broken platform
+
+    // Check horizontal overlap
+    const heroLeft = HERO_X - state.heroRadius * 0.6;
+    const heroRight = HERO_X + state.heroRadius * 0.6;
+    const platLeft = platform.x;
+    const platRight = platform.x + platform.width;
+
+    if (heroRight > platLeft && heroLeft < platRight) {
+      // Check if hero crossed the platform top this frame
+      if (heroPrevBottom <= platform.y && heroBottom >= platform.y) {
+        return platform;
+      }
+    }
+  }
+  return null;
 }
 
 // ==================== MAIN APP COMPONENT ====================
@@ -386,9 +508,19 @@ function App() {
   const handleJump = useCallback(() => {
     const state = stateRef.current;
     if (state.isGameOver || state.isPaused) return;
-    if (state.isGrounded) {
+
+    if (state.isGrounded || state.onPlatform) {
+      // Normal jump from ground or platform
       state.velocityY = JUMP_FORCE;
       state.isGrounded = false;
+      state.onPlatform = null;
+      state.hasDoubleJumped = false; // Reset double jump for this airtime
+    } else if (state.doubleJumpActive && !state.hasDoubleJumped) {
+      // Double jump in mid-air
+      state.velocityY = DOUBLE_JUMP_FORCE;
+      state.hasDoubleJumped = true;
+      // Purple particles for double jump
+      addParticles(state, HERO_X, state.heroY, '#c084fc', 8);
     }
   }, []);
 
@@ -398,7 +530,7 @@ function App() {
 
   const togglePause = useCallback(() => {
     const state = stateRef.current;
-    if (state.isGameOver) return; // Cannot pause during game over
+    if (state.isGameOver) return;
     state.isPaused = !state.isPaused;
   }, []);
 
@@ -413,11 +545,66 @@ function App() {
     state.velocityY += GRAVITY;
     state.heroY += state.velocityY;
 
+    // Platform landing check (before ground check)
+    const landedPlatform = checkPlatformLanding(state);
+    if (landedPlatform) {
+      state.heroY = landedPlatform.y - state.heroRadius;
+      state.velocityY = 0;
+      state.isGrounded = false; // Not on ground, but on platform
+      state.onPlatform = landedPlatform;
+      state.hasDoubleJumped = false; // Can double jump off platform too
+    }
+
+    // If on a platform, track standing time
+    if (state.onPlatform) {
+      // Verify hero is still on the platform (horizontal overlap)
+      const heroLeft = HERO_X - state.heroRadius * 0.6;
+      const heroRight = HERO_X + state.heroRadius * 0.6;
+      const plat = state.onPlatform;
+      const platLeft = plat.x;
+      const platRight = plat.x + plat.width;
+
+      if (heroRight > platLeft && heroLeft < platRight) {
+        plat.standTimer++;
+        // Update crack level
+        if (plat.standTimer >= PLATFORM_BREAK_TIME) {
+          plat.crackLevel = 3; // Fully broken
+        } else if (plat.standTimer >= PLATFORM_CRACK_START) {
+          plat.crackLevel = Math.floor((plat.standTimer - PLATFORM_CRACK_START) / ((PLATFORM_BREAK_TIME - PLATFORM_CRACK_START) / 3)) + 1;
+          plat.breaking = true;
+        }
+      } else {
+        // Hero walked off platform
+        state.onPlatform = null;
+      }
+    }
+
+    // Ground collision
     if (state.heroY >= GROUND_Y - state.heroRadius) {
       state.heroY = GROUND_Y - state.heroRadius;
       state.velocityY = 0;
       state.isGrounded = true;
+      state.onPlatform = null;
+      state.hasDoubleJumped = false;
     }
+
+    // If hero fell below platform without landing, clear onPlatform
+    if (state.onPlatform && state.velocityY > 0) {
+      const heroBottom = state.heroY + state.heroRadius;
+      if (heroBottom > state.onPlatform.y + 20) {
+        state.onPlatform = null;
+      }
+    }
+
+    // --- Double Jump Timer ---
+    if (state.doubleJumpActive) {
+      state.doubleJumpTimer--;
+      if (state.doubleJumpTimer <= 0) {
+        state.doubleJumpActive = false;
+        state.hasDoubleJumped = false;
+      }
+    }
+    if (state.doubleJumpReadyTimer > 0) state.doubleJumpReadyTimer--;
 
     // --- Background Scroll ---
     state.scrollOffset += state.scrollSpeed;
@@ -428,9 +615,7 @@ function App() {
     // --- Move Entities ---
     for (let i = state.obstacles.length - 1; i >= 0; i--) {
       state.obstacles[i].x -= state.scrollSpeed;
-      if (state.obstacles[i].x + state.obstacles[i].width < -50) {
-        state.obstacles.splice(i, 1);
-      }
+      if (state.obstacles[i].x + state.obstacles[i].width < -50) state.obstacles.splice(i, 1);
     }
 
     for (let i = state.coins.length - 1; i >= 0; i--) {
@@ -441,6 +626,25 @@ function App() {
     for (let i = state.shrinkers.length - 1; i >= 0; i--) {
       state.shrinkers[i].x -= state.scrollSpeed;
       if (state.shrinkers[i].x < -50) state.shrinkers.splice(i, 1);
+    }
+
+    // Move platforms
+    for (let i = state.platforms.length - 1; i >= 0; i--) {
+      const plat = state.platforms[i];
+      plat.x -= state.scrollSpeed;
+
+      // Remove if off screen or fully broken
+      if (plat.x + plat.width < -50 || plat.crackLevel >= 3) {
+        // If hero was on this platform, detach
+        if (state.onPlatform === plat) {
+          state.onPlatform = null;
+        }
+        // Break particles
+        if (plat.crackLevel >= 3) {
+          addParticles(state, plat.x + plat.width / 2, plat.y, '#92400e', 6);
+        }
+        state.platforms.splice(i, 1);
+      }
     }
 
     // --- Update Floating Texts ---
@@ -462,12 +666,24 @@ function App() {
       if (p.life <= 0) state.particles.splice(i, 1);
     }
 
+    // --- Update Speed Lines ---
+    for (let i = state.speedLines.length - 1; i >= 0; i--) {
+      const sl = state.speedLines[i];
+      sl.x -= sl.speed;
+      sl.alpha -= 0.02;
+      if (sl.x + sl.length < 0 || sl.alpha <= 0) state.speedLines.splice(i, 1);
+    }
+
+    // Spawn speed lines based on current speed (more lines = faster)
+    if (state.frameCount % Math.max(2, Math.floor(10 - state.scrollSpeed)) === 0) {
+      addSpeedLine(state);
+    }
+
     // --- Visual Effect Timers ---
     if (state.flashTimer > 0) state.flashTimer--;
-    if (state.speedUpTimer > 0) state.speedUpTimer--;
     if (state.invincibilityTimer > 0) state.invincibilityTimer--;
 
-    // Screen shake decay
+    // Screen shake
     if (state.screenShakeTimer > 0) {
       state.screenShakeTimer--;
       state.screenShakeX = (Math.random() - 0.5) * 5;
@@ -488,26 +704,23 @@ function App() {
       state.squishScaleY = 1;
     }
 
-    // --- DIFFICULTY SCALING ---
-
-    // Speed increase every 3 seconds (180 frames), +4%
+    // --- CONTINUOUS DIFFICULTY SCALING (BUG FIX) ---
+    // Speed increases EVERY 3 seconds, continuously, until cap
     state.speedTimer++;
-    if (state.speedTimer >= 180) {
+    if (state.speedTimer >= 180) { // 3 seconds
       state.speedTimer = 0;
       const maxSpeed = state.baseSpeed * SPEED_CAP_MULTIPLIER;
       if (state.scrollSpeed < maxSpeed) {
-        state.scrollSpeed *= 1.04;
+        state.scrollSpeed *= 1.04; // +4%
         if (state.scrollSpeed > maxSpeed) state.scrollSpeed = maxSpeed;
-        // Show speed up indicator
-        state.speedUpTimer = SPEED_UP_DISPLAY;
       }
+      // NO other condition stops this - it runs forever until cap
     }
 
-    // Obstacle spawn rate increase every 5 seconds (300 frames)
+    // Obstacle spawn rate increase every 5 seconds
     state.spawnRateTimer++;
     if (state.spawnRateTimer >= 300) {
       state.spawnRateTimer = 0;
-      // Reduce minimum interval by ~6 frames (0.1s), min 36 frames (0.6s)
       state.minObstacleInterval = Math.max(36, state.minObstacleInterval - 6);
     }
 
@@ -516,13 +729,11 @@ function App() {
     if (state.obstacleTimer >= state.obstacleInterval) {
       state.obstacleTimer = 0;
       spawnObstacle(state);
-      // Next interval between minObstacleInterval and minObstacleInterval + 60
       state.obstacleInterval = randomRange(state.minObstacleInterval, state.minObstacleInterval + 60);
     }
 
     state.coinTimer++;
-    // Coin spawn rate slightly reduces over time (interval increases slightly)
-    const coinBaseInterval = 45 + Math.floor(state.survivalTime / 1800) * 5; // Every 30s, +5 frames
+    const coinBaseInterval = 45 + Math.floor(state.survivalTime / 1800) * 5;
     if (state.coinTimer >= state.coinInterval) {
       state.coinTimer = 0;
       spawnCoin(state);
@@ -530,8 +741,7 @@ function App() {
     }
 
     state.shrinkerTimer++;
-    // Shrinker frequency slightly increases over time (interval decreases slightly)
-    const shrinkerReduction = Math.min(120, Math.floor(state.survivalTime / 1800) * 15); // Every 30s, -15 frames
+    const shrinkerReduction = Math.min(120, Math.floor(state.survivalTime / 1800) * 15);
     if (state.shrinkerTimer >= state.shrinkerInterval) {
       state.shrinkerTimer = 0;
       spawnShrinker(state);
@@ -539,6 +749,23 @@ function App() {
         Math.max(300, 480 - shrinkerReduction),
         Math.max(420, 720 - shrinkerReduction)
       );
+    }
+
+    // Platform spawning - increases with speed
+    state.platformTimer++;
+    const platformIntervalAdjusted = Math.max(60, state.platformInterval - Math.floor(state.scrollSpeed * 5));
+    if (state.platformTimer >= platformIntervalAdjusted) {
+      state.platformTimer = 0;
+      spawnPlatform(state);
+      state.platformInterval = randomRange(90, 200);
+    }
+
+    // Double jump power-up spawning
+    state.doubleJumpSpawnTimer++;
+    const djInterval = randomRange(DOUBLE_JUMP_SPAWN_MIN, DOUBLE_JUMP_SPAWN_MAX);
+    if (state.doubleJumpSpawnTimer >= djInterval) {
+      state.doubleJumpSpawnTimer = 0;
+      spawnDoubleJumpPowerUp(state);
     }
 
     // --- Check Collisions ---
@@ -570,6 +797,18 @@ function App() {
       ctx.stroke();
     }
 
+    // --- Speed Lines (subtle visual feedback for speed) ---
+    for (const sl of state.speedLines) {
+      ctx.globalAlpha = Math.max(0, sl.alpha);
+      ctx.strokeStyle = 'rgba(100, 100, 100, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(sl.x, sl.y);
+      ctx.lineTo(sl.x + sl.length, sl.y);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
     // --- Ground ---
     ctx.fillStyle = '#1f2937';
     ctx.fillRect(0, GROUND_Y, CANVAS_WIDTH, CANVAS_HEIGHT - GROUND_Y);
@@ -579,6 +818,73 @@ function App() {
     ctx.moveTo(0, GROUND_Y);
     ctx.lineTo(CANVAS_WIDTH, GROUND_Y);
     ctx.stroke();
+
+    // --- Platforms (brown/wooden) ---
+    for (const plat of state.platforms) {
+      // Skip fully broken
+      if (plat.crackLevel >= 3) continue;
+
+      // Shake if breaking
+      let drawX = plat.x;
+      let drawY = plat.y;
+      if (plat.breaking) {
+        drawX += (Math.random() - 0.5) * plat.crackLevel * 2;
+        drawY += (Math.random() - 0.5) * plat.crackLevel;
+      }
+
+      // Platform body (wooden brown)
+      ctx.fillStyle = '#92400e';
+      ctx.fillRect(drawX, drawY, plat.width, plat.height);
+
+      // Wood grain lines
+      ctx.strokeStyle = '#78350f';
+      ctx.lineWidth = 1;
+      for (let g = 0; g < 3; g++) {
+        const gy = drawY + 3 + g * 4;
+        ctx.beginPath();
+        ctx.moveTo(drawX + 2, gy);
+        ctx.lineTo(drawX + plat.width - 2, gy);
+        ctx.stroke();
+      }
+
+      // Platform border
+      ctx.strokeStyle = '#451a03';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(drawX, drawY, plat.width, plat.height);
+
+      // Top highlight
+      ctx.fillStyle = '#b45309';
+      ctx.fillRect(drawX, drawY, plat.width, 3);
+
+      // Crack lines (when breaking)
+      if (plat.crackLevel >= 1) {
+        ctx.strokeStyle = '#1c1917';
+        ctx.lineWidth = 1.5;
+        // Crack 1
+        ctx.beginPath();
+        ctx.moveTo(drawX + plat.width * 0.3, drawY);
+        ctx.lineTo(drawX + plat.width * 0.35, drawY + plat.height * 0.5);
+        ctx.lineTo(drawX + plat.width * 0.28, drawY + plat.height);
+        ctx.stroke();
+      }
+      if (plat.crackLevel >= 2) {
+        // Crack 2
+        ctx.beginPath();
+        ctx.moveTo(drawX + plat.width * 0.7, drawY);
+        ctx.lineTo(drawX + plat.width * 0.65, drawY + plat.height * 0.6);
+        ctx.lineTo(drawX + plat.width * 0.72, drawY + plat.height);
+        ctx.stroke();
+      }
+      if (plat.crackLevel >= 3) {
+        // Crack 3 - X pattern
+        ctx.beginPath();
+        ctx.moveTo(drawX + plat.width * 0.45, drawY + 2);
+        ctx.lineTo(drawX + plat.width * 0.55, drawY + plat.height - 2);
+        ctx.moveTo(drawX + plat.width * 0.55, drawY + 2);
+        ctx.lineTo(drawX + plat.width * 0.45, drawY + plat.height - 2);
+        ctx.stroke();
+      }
+    }
 
     // --- Obstacles ---
     for (const obs of state.obstacles) {
@@ -599,22 +905,93 @@ function App() {
 
     // --- Coins ---
     for (const coin of state.coins) {
-      ctx.beginPath();
-      ctx.arc(coin.x, coin.y, coin.radius + 3, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(251, 191, 36, 0.3)';
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
-      ctx.fillStyle = '#f59e0b';
-      ctx.fill();
-      ctx.strokeStyle = '#d97706';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.fillStyle = '#92400e';
-      ctx.font = 'bold 12px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('$', coin.x, coin.y + 1);
+      if (coin.type === 'doubleJump') {
+        // Purple double-jump power-up coin
+        const pulse = Math.sin(state.frameCount * 0.15) * 3 + 3;
+        // Glow
+        ctx.beginPath();
+        ctx.arc(coin.x, coin.y, coin.radius + pulse + 4, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(168, 85, 247, 0.2)';
+        ctx.fill();
+        // Body
+        ctx.beginPath();
+        ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
+        ctx.fillStyle = '#a855f7';
+        ctx.fill();
+        ctx.strokeStyle = '#7c3aed';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // "2x" text
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('2x', coin.x, coin.y);
+        // Sparkle
+        const sparkleAngle = state.frameCount * 0.05;
+        for (let s = 0; s < 4; s++) {
+          const sa = sparkleAngle + (Math.PI / 2) * s;
+          const sx = coin.x + Math.cos(sa) * (coin.radius + 6);
+          const sy = coin.y + Math.sin(sa) * (coin.radius + 6);
+          ctx.fillStyle = 'rgba(196, 181, 253, 0.8)';
+          ctx.beginPath();
+          ctx.arc(sx, sy, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else if (coin.type === 'high') {
+        // High-altitude gold coin with sparkle
+        const sparkle = Math.sin(state.frameCount * 0.12 + coin.sparklePhase) * 0.3 + 0.7;
+        // Outer sparkle ring
+        ctx.beginPath();
+        ctx.arc(coin.x, coin.y, coin.radius + 5, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(252, 211, 77, ${sparkle * 0.3})`;
+        ctx.fill();
+        // Body
+        ctx.beginPath();
+        ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
+        ctx.fillStyle = '#fbbf24';
+        ctx.fill();
+        ctx.strokeStyle = '#d97706';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        // Star/diamond shape inside
+        ctx.fillStyle = '#92400e';
+        ctx.font = 'bold 13px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('★', coin.x, coin.y + 1);
+        // Sparkle particles
+        for (let s = 0; s < 3; s++) {
+          const sa = state.frameCount * 0.08 + (Math.PI * 2 / 3) * s;
+          const sr = coin.radius + 8 + Math.sin(state.frameCount * 0.1 + s) * 3;
+          const sx = coin.x + Math.cos(sa) * sr;
+          const sy = coin.y + Math.sin(sa) * sr;
+          ctx.globalAlpha = sparkle;
+          ctx.fillStyle = '#fef3c7';
+          ctx.beginPath();
+          ctx.arc(sx, sy, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      } else {
+        // Normal yellow coin
+        ctx.beginPath();
+        ctx.arc(coin.x, coin.y, coin.radius + 3, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(251, 191, 36, 0.3)';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
+        ctx.fillStyle = '#f59e0b';
+        ctx.fill();
+        ctx.strokeStyle = '#d97706';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.fillStyle = '#92400e';
+        ctx.font = 'bold 12px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('$', coin.x, coin.y + 1);
+      }
     }
 
     // --- Shrinkers ---
@@ -652,6 +1029,22 @@ function App() {
     ctx.save();
     ctx.translate(HERO_X, state.heroY);
     ctx.scale(state.squishScaleX, state.squishScaleY);
+
+    // Double jump purple aura
+    if (state.doubleJumpActive) {
+      const auraPulse = Math.sin(state.frameCount * 0.1) * 5 + 10;
+      const auraAlpha = 0.2 + Math.sin(state.frameCount * 0.08) * 0.1;
+      ctx.beginPath();
+      ctx.arc(0, 0, state.heroRadius + auraPulse, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(168, 85, 247, ${auraAlpha})`;
+      ctx.fill();
+      // Second aura ring
+      ctx.beginPath();
+      ctx.arc(0, 0, state.heroRadius + auraPulse + 5, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(196, 181, 253, ${auraAlpha * 0.5})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
 
     // Invincibility flashing
     const isInvincibleVisible = state.invincibilityTimer <= 0 || Math.floor(state.invincibilityTimer / 3) % 2 === 0;
@@ -709,14 +1102,25 @@ function App() {
     }
     ctx.globalAlpha = 1;
 
-    // --- UI: Score & Best Score ---
+    // --- "DOUBLE JUMP READY" text ---
+    if (state.doubleJumpReadyTimer > 0) {
+      const alpha = Math.min(1, state.doubleJumpReadyTimer / 30);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#a855f7';
+      ctx.font = 'bold 22px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('⚡ DOUBLE JUMP READY! ⚡', CANVAS_WIDTH / 2, 70);
+      ctx.globalAlpha = 1;
+    }
+
+    // --- UI: Score & Best ---
     ctx.fillStyle = '#1f2937';
     ctx.font = 'bold 20px Arial';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText(`Score: ${state.score}`, 15, 12);
 
-    // Best score (small, below main score)
     ctx.fillStyle = '#6b7280';
     ctx.font = '14px Arial';
     ctx.fillText(`Best: ${state.highScore}`, 15, 36);
@@ -726,6 +1130,15 @@ function App() {
     ctx.font = '14px Arial';
     ctx.textAlign = 'center';
     ctx.fillText(`⏱ ${formatTime(state.survivalTime)}`, CANVAS_WIDTH / 2, 36);
+
+    // Double jump timer indicator
+    if (state.doubleJumpActive) {
+      const djSecondsLeft = Math.ceil(state.doubleJumpTimer / 60);
+      ctx.fillStyle = '#a855f7';
+      ctx.font = 'bold 14px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(`2x JUMP: ${djSecondsLeft}s`, CANVAS_WIDTH / 2, 52);
+    }
 
     // --- UI: Size percentage ---
     const sizePercent = Math.round((state.heroRadius / MAX_RADIUS) * 100);
@@ -762,21 +1175,9 @@ function App() {
     ctx.textBaseline = 'middle';
     ctx.fillText('DANGER', barX + barWidth / 2, barY + barHeight / 2);
 
-    // --- SPEED UP indicator ---
-    if (state.speedUpTimer > 0) {
-      const alpha = Math.min(1, state.speedUpTimer / 20);
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = '#f97316';
-      ctx.font = 'bold 28px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('⚡ SPEED UP! ⚡', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 40);
-      ctx.globalAlpha = 1;
-    }
+    ctx.restore(); // End screen shake transform
 
-    ctx.restore(); // Restore screen shake transform
-
-    // --- PAUSE OVERLAY (drawn without shake) ---
+    // --- PAUSE OVERLAY ---
     if (state.isPaused) {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -807,14 +1208,11 @@ function App() {
       ctx.textBaseline = 'middle';
       ctx.fillText('GAME OVER', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 80);
 
-      // Final score
       ctx.fillStyle = '#fff';
       ctx.font = '24px Arial';
       ctx.fillText(`Final Score: ${state.score}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 30);
 
-      // Best score (gold if new record)
       if (state.isNewRecord) {
-        // Pulsing gold text for new record
         const pulse = Math.sin(state.frameCount * 0.08) * 0.3 + 0.7;
         ctx.fillStyle = `rgba(251, 191, 36, ${pulse})`;
         ctx.font = 'bold 22px Arial';
@@ -825,13 +1223,11 @@ function App() {
         ctx.fillText(`Best Score: ${state.highScore}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 5);
       }
 
-      // Max size & time
       ctx.fillStyle = '#d1d5db';
       ctx.font = '18px Arial';
       ctx.fillText(`Max Size: ${Math.round(state.maxRadiusReached)}px`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 40);
       ctx.fillText(`Time Survived: ${formatTime(state.survivalTime)}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 65);
 
-      // Restart instruction
       ctx.fillStyle = '#6b7280';
       ctx.font = '16px Arial';
       ctx.fillText('Press R or Click to Restart', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 105);
@@ -847,11 +1243,9 @@ function App() {
     if (!ctx) return;
 
     const state = stateRef.current;
-
     update(state);
     draw(ctx, state);
 
-    // Keep frameCount incrementing even when paused/game over (for animations)
     if (state.isPaused || state.isGameOver) {
       state.frameCount++;
     }
@@ -934,12 +1328,13 @@ function App() {
         height={CANVAS_HEIGHT}
         className="border-2 border-gray-600 rounded-lg shadow-2xl cursor-pointer max-w-full"
       />
-      <div className="mt-4 flex flex-wrap gap-4 justify-center text-xs text-gray-500">
-        <span>🟥 Obstacles = Grow + Screen Shake</span>
+      <div className="mt-4 flex flex-wrap gap-3 justify-center text-xs text-gray-500">
+        <span>🟥 Obstacles = Grow</span>
         <span>🟢 Green = Shrink +5</span>
         <span>🟡 Coins = +10</span>
-        <span>💀 Max size = Game Over</span>
-        <span>🏆 High Score saved locally</span>
+        <span>⭐ Gold = +25 (use platforms!)</span>
+        <span>🟣 Purple = Double Jump</span>
+        <span>🟫 Platforms = Jump higher (break after 1s)</span>
       </div>
     </div>
   );
