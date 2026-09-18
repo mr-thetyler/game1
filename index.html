@@ -546,29 +546,15 @@
         let platforms = [];
         let particles = [];
         
-        // Smart spawning tracking
-        let lastObstacleX = canvas.width;
-        let onScreenObstacles = 0;
-        
-        // Spawn timers
-        let lastObstacleSpawn = 0;
-        let lastBirdSpawn = 0;
-        let lastShrinkerSpawn = 0;
-        let lastCoinSpawn = 0;
-        let lastGoldenCoinSpawn = 0;
-        let lastDoubleJumpSpawn = 0;
-        let lastIceShieldSpawn = 0;
-        let lastPlatformSpawn = 0;
-        
-        // FIXED: Store next spawn times instead of recalculating every frame
-        let nextObstacleSpawn = 0;
-        let nextBirdSpawn = 0;
-        let nextShrinkerSpawn = 0;
-        let nextCoinSpawn = 0;
-        let nextGoldenCoinSpawn = 0;
-        let nextDoubleJumpSpawn = 0;
-        let nextIceShieldSpawn = 0;
-        let nextPlatformSpawn = 0;
+        // SIMPLE SPAWN TIMERS - accumulate deltaTime
+        let obstacleSpawnTimer = 0;
+        let birdSpawnTimer = 0;
+        let platformSpawnTimer = 0;
+        let coinSpawnTimer = 0;
+        let goldenCoinSpawnTimer = 0;
+        let shrinkerSpawnTimer = 0;
+        let iceShieldSpawnTimer = 0;
+        let doubleJumpSpawnTimer = 0;
         
         // Progress tracking
         let unlockedLevels = [1];
@@ -725,28 +711,15 @@
             gameTime = 0;
             lastTime = 0;
             
-            // Reset smart spawning
-            lastObstacleX = canvas.width;
-            onScreenObstacles = 0;
-            
-            lastObstacleSpawn = 0;
-            lastBirdSpawn = 0;
-            lastShrinkerSpawn = 0;
-            lastCoinSpawn = 0;
-            lastGoldenCoinSpawn = 0;
-            lastDoubleJumpSpawn = 0;
-            lastIceShieldSpawn = 0;
-            lastPlatformSpawn = 0;
-            
-            // Initialize next spawn times with first spawn intervals
-            nextObstacleSpawn = 2000; // First obstacle after 2 seconds
-            nextBirdSpawn = 10000; // First bird after 10 seconds
-            nextShrinkerSpawn = 15000; // First shrinker after 15 seconds
-            nextCoinSpawn = 2000; // First coin after 2 seconds
-            nextGoldenCoinSpawn = 5000; // First golden coin after 5 seconds
-            nextDoubleJumpSpawn = 25000; // First double jump after 25 seconds
-            nextIceShieldSpawn = 20000; // First ice shield after 20 seconds
-            nextPlatformSpawn = 3000; // First platform after 3 seconds
+            // Reset spawn timers
+            obstacleSpawnTimer = 0;
+            birdSpawnTimer = 0;
+            platformSpawnTimer = 0;
+            coinSpawnTimer = 0;
+            goldenCoinSpawnTimer = 0;
+            shrinkerSpawnTimer = 0;
+            iceShieldSpawnTimer = 0;
+            doubleJumpSpawnTimer = 0;
             
             levelTimeRemaining = currentLevel.targetTime;
             
@@ -994,52 +967,38 @@
             startLevel(currentLevel.id);
         }
         
-        // FIXED: Spawn obstacle with proper logic
+        // REWRITTEN SPAWN FUNCTIONS WITH CONSOLE.LOG DEBUGGING
+        
         function spawnObstacle() {
-            const spawnX = canvas.width;
-            
-            // Check minimum gap from last obstacle
-            if (spawnX - lastObstacleX < currentLevel.obstacleGap) {
-                return;
-            }
-            
-            // Check max obstacles on screen
-            if (onScreenObstacles >= currentLevel.maxObstacles) {
-                return;
-            }
-            
+            const spawnX = canvas.width + 50;
             const height = 30 + Math.random() * 40;
+            
+            console.log("🔴 Spawning obstacle at X:", spawnX, "Height:", height);
+            
             obstacles.push({
                 x: spawnX,
                 y: canvas.height - 50 - height,
                 width: 30,
                 height: height
             });
-            
-            lastObstacleX = spawnX;
-            onScreenObstacles++;
         }
         
-        // FIXED: Spawn bird with 3 height lanes
         function spawnBird() {
-            const spawnX = canvas.width;
+            const spawnX = canvas.width + 50;
             
-            // Don't spawn in first 10 seconds
-            if (gameTime < 10000) return;
-            
-            // FIXED: 3 height lanes with proper distribution
+            // 3 height lanes with proper distribution
             const rand = Math.random();
             let laneY;
             
             if (rand < 0.3) {
-                // Low lane (30%) - player must NOT jump
-                laneY = 250 + Math.random() * 50; // 250-300px
+                laneY = 250 + Math.random() * 50; // 250-300px (low)
+                console.log("🐦 Spawning LOW bird at Y:", laneY);
             } else if (rand < 0.8) {
-                // Medium lane (50%) - player must time jump
-                laneY = 150 + Math.random() * 100; // 150-250px
+                laneY = 150 + Math.random() * 100; // 150-250px (medium)
+                console.log("🐦 Spawning MEDIUM bird at Y:", laneY);
             } else {
-                // High lane (20%) - player must use platforms/double jump
-                laneY = 80 + Math.random() * 70; // 80-150px
+                laneY = 80 + Math.random() * 70; // 80-150px (high)
+                console.log("🐦 Spawning HIGH bird at Y:", laneY);
             }
             
             birds.push({
@@ -1052,78 +1011,88 @@
             });
         }
         
-        // Spawn shrinker
-        function spawnShrinker() {
-            shrinkers.push({
-                x: canvas.width,
-                y: canvas.height - 80 - Math.random() * 100,
-                radius: 15
-            });
-        }
-        
-        // Spawn coin
-        function spawnCoin() {
-            coins.push({
-                x: canvas.width,
-                y: canvas.height - 80 - Math.random() * 100,
-                radius: 10
-            });
-        }
-        
-        // Spawn golden coin at high position
-        function spawnGoldenCoin() {
-            goldenCoins.push({
-                x: canvas.width,
-                y: 80 + Math.random() * 100, // High position (80-180px)
-                radius: 12,
-                sparkleAngle: 0
-            });
-        }
-        
-        // Spawn double jump power-up
-        function spawnDoubleJump() {
-            doubleJumps.push({
-                x: canvas.width,
-                y: canvas.height - 80 - Math.random() * 100,
-                radius: 15
-            });
-        }
-        
-        // Spawn ice shield
-        function spawnIceShield() {
-            iceShields.push({
-                x: canvas.width,
-                y: canvas.height - 80 - Math.random() * 100,
-                radius: 15
-            });
-        }
-        
-        // FIXED: Spawn platform at reachable heights
         function spawnPlatform() {
-            // FIXED: Platform Y position between 150-350px from top (reachable)
-            const rand = Math.random();
-            let platformY;
+            const spawnX = canvas.width + 50;
             
-            if (rand < 0.4) {
-                // Low height (40%) - easy jump
-                platformY = 300 + Math.random() * 50; // 300-350px
-            } else if (rand < 0.8) {
-                // Medium height (40%) - medium jump
-                platformY = 220 + Math.random() * 80; // 220-300px
-            } else {
-                // High height (20%) - requires double jump or platform hopping
-                platformY = 150 + Math.random() * 70; // 150-220px
-            }
-            
+            // Platform Y position between 150-350px from top (reachable)
+            const platformY = 150 + Math.random() * 200; // 150-350px
             const platformWidth = 120 + Math.random() * 60; // 120-180px wide
             
+            console.log("🟫 Spawning platform at X:", spawnX, "Y:", platformY, "Width:", platformWidth);
+            
             platforms.push({
-                x: canvas.width,
+                x: spawnX,
                 y: platformY,
                 width: platformWidth,
                 height: 15,
                 breakTimer: 60,
                 cracked: 0
+            });
+        }
+        
+        function spawnCoin() {
+            const spawnX = canvas.width + 50;
+            const spawnY = canvas.height - 80 - Math.random() * 100;
+            
+            console.log("🟡 Spawning coin at X:", spawnX, "Y:", spawnY);
+            
+            coins.push({
+                x: spawnX,
+                y: spawnY,
+                radius: 10
+            });
+        }
+        
+        function spawnGoldenCoin() {
+            const spawnX = canvas.width + 50;
+            const spawnY = 80 + Math.random() * 100; // High position
+            
+            console.log("⭐ Spawning GOLDEN coin at X:", spawnX, "Y:", spawnY);
+            
+            goldenCoins.push({
+                x: spawnX,
+                y: spawnY,
+                radius: 12,
+                sparkleAngle: 0
+            });
+        }
+        
+        function spawnShrinker() {
+            const spawnX = canvas.width + 50;
+            const spawnY = canvas.height - 80 - Math.random() * 100;
+            
+            console.log("🟢 Spawning shrinker at X:", spawnX, "Y:", spawnY);
+            
+            shrinkers.push({
+                x: spawnX,
+                y: spawnY,
+                radius: 15
+            });
+        }
+        
+        function spawnDoubleJump() {
+            const spawnX = canvas.width + 50;
+            const spawnY = canvas.height - 80 - Math.random() * 100;
+            
+            console.log("🟣 Spawning double jump at X:", spawnX, "Y:", spawnY);
+            
+            doubleJumps.push({
+                x: spawnX,
+                y: spawnY,
+                radius: 15
+            });
+        }
+        
+        function spawnIceShield() {
+            const spawnX = canvas.width + 50;
+            const spawnY = canvas.height - 80 - Math.random() * 100;
+            
+            console.log("🔵 Spawning ice shield at X:", spawnX, "Y:", spawnY);
+            
+            iceShields.push({
+                x: spawnX,
+                y: spawnY,
+                radius: 15
             });
         }
         
@@ -1218,79 +1187,78 @@
             document.getElementById('size').textContent = Math.round((player.radius / 20) * 100);
             document.getElementById('speed').textContent = speedMultiplier.toFixed(1);
             
-            // Count on-screen obstacles
-            onScreenObstacles = obstacles.filter(obs => obs.x > 0 && obs.x < canvas.width).length;
+            // SIMPLE SPAWN TIMING - accumulate deltaTime
             
-            // FIXED: Spawn obstacles with proper timing
-            if (gameTime >= nextObstacleSpawn) {
+            // Spawn obstacles every 2-4 seconds (level dependent)
+            obstacleSpawnTimer += deltaTime;
+            const obstacleInterval = currentLevel.obstacleInterval[0] + 
+                Math.random() * (currentLevel.obstacleInterval[1] - currentLevel.obstacleInterval[0]);
+            if (obstacleSpawnTimer >= obstacleInterval) {
                 spawnObstacle();
-                lastObstacleSpawn = gameTime;
-                const interval = currentLevel.obstacleInterval[0] + 
-                    Math.random() * (currentLevel.obstacleInterval[1] - currentLevel.obstacleInterval[0]);
-                nextObstacleSpawn = gameTime + interval;
+                obstacleSpawnTimer = 0;
             }
             
-            // FIXED: Spawn birds with proper timing
-            if (gameTime >= nextBirdSpawn) {
+            // Spawn birds every 5-10 seconds (level dependent), not in first 10 seconds
+            birdSpawnTimer += deltaTime;
+            const birdInterval = currentLevel.birdInterval[0] + 
+                Math.random() * (currentLevel.birdInterval[1] - currentLevel.birdInterval[0]);
+            if (birdSpawnTimer >= birdInterval && gameTime > 10000) {
                 spawnBird();
-                lastBirdSpawn = gameTime;
-                const interval = currentLevel.birdInterval[0] + 
-                    Math.random() * (currentLevel.birdInterval[1] - currentLevel.birdInterval[0]);
-                nextBirdSpawn = gameTime + interval;
+                birdSpawnTimer = 0;
             }
             
-            // Spawn shrinkers (guaranteed lifeline)
-            if (gameTime >= nextShrinkerSpawn) {
-                spawnShrinker();
-                lastShrinkerSpawn = gameTime;
-                const interval = currentLevel.shrinkerInterval[0] + 
-                    Math.random() * (currentLevel.shrinkerInterval[1] - currentLevel.shrinkerInterval[0]);
-                nextShrinkerSpawn = gameTime + interval;
-            }
-            
-            // FIXED: Spawn coins frequently (every 2-3 seconds)
-            if (gameTime >= nextCoinSpawn) {
-                spawnCoin();
-                lastCoinSpawn = gameTime;
-                const interval = currentLevel.coinInterval[0] + 
-                    Math.random() * (currentLevel.coinInterval[1] - currentLevel.coinInterval[0]);
-                nextCoinSpawn = gameTime + interval;
-            }
-            
-            // FIXED: Spawn golden coins at high positions (every 5-8 seconds)
-            if (gameTime >= nextGoldenCoinSpawn) {
-                spawnGoldenCoin();
-                lastGoldenCoinSpawn = gameTime;
-                const interval = currentLevel.goldenCoinInterval[0] + 
-                    Math.random() * (currentLevel.goldenCoinInterval[1] - currentLevel.goldenCoinInterval[0]);
-                nextGoldenCoinSpawn = gameTime + interval;
-            }
-            
-            // Spawn double jumps (guaranteed lifeline)
-            if (gameTime >= nextDoubleJumpSpawn && gameTime > 20000) {
-                spawnDoubleJump();
-                lastDoubleJumpSpawn = gameTime;
-                const interval = currentLevel.doubleJumpInterval[0] + 
-                    Math.random() * (currentLevel.doubleJumpInterval[1] - currentLevel.doubleJumpInterval[0]);
-                nextDoubleJumpSpawn = gameTime + interval;
-            }
-            
-            // Spawn ice shields (guaranteed lifeline)
-            if (gameTime >= nextIceShieldSpawn) {
-                spawnIceShield();
-                lastIceShieldSpawn = gameTime;
-                const interval = currentLevel.iceShieldInterval[0] + 
-                    Math.random() * (currentLevel.iceShieldInterval[1] - currentLevel.iceShieldInterval[0]);
-                nextIceShieldSpawn = gameTime + interval;
-            }
-            
-            // FIXED: Spawn platforms more frequently (every 3-5 seconds)
-            if (gameTime >= nextPlatformSpawn) {
+            // Spawn platforms every 3-5 seconds
+            platformSpawnTimer += deltaTime;
+            const platformInterval = currentLevel.platformInterval[0] + 
+                Math.random() * (currentLevel.platformInterval[1] - currentLevel.platformInterval[0]);
+            if (platformSpawnTimer >= platformInterval) {
                 spawnPlatform();
-                lastPlatformSpawn = gameTime;
-                const interval = currentLevel.platformInterval[0] + 
-                    Math.random() * (currentLevel.platformInterval[1] - currentLevel.platformInterval[0]);
-                nextPlatformSpawn = gameTime + interval;
+                platformSpawnTimer = 0;
+            }
+            
+            // Spawn coins every 2-3 seconds
+            coinSpawnTimer += deltaTime;
+            const coinInterval = currentLevel.coinInterval[0] + 
+                Math.random() * (currentLevel.coinInterval[1] - currentLevel.coinInterval[0]);
+            if (coinSpawnTimer >= coinInterval) {
+                spawnCoin();
+                coinSpawnTimer = 0;
+            }
+            
+            // Spawn golden coins every 5-8 seconds
+            goldenCoinSpawnTimer += deltaTime;
+            const goldenCoinInterval = currentLevel.goldenCoinInterval[0] + 
+                Math.random() * (currentLevel.goldenCoinInterval[1] - currentLevel.goldenCoinInterval[0]);
+            if (goldenCoinSpawnTimer >= goldenCoinInterval) {
+                spawnGoldenCoin();
+                goldenCoinSpawnTimer = 0;
+            }
+            
+            // Spawn shrinkers every 15-20 seconds
+            shrinkerSpawnTimer += deltaTime;
+            const shrinkerInterval = currentLevel.shrinkerInterval[0] + 
+                Math.random() * (currentLevel.shrinkerInterval[1] - currentLevel.shrinkerInterval[0]);
+            if (shrinkerSpawnTimer >= shrinkerInterval) {
+                spawnShrinker();
+                shrinkerSpawnTimer = 0;
+            }
+            
+            // Spawn ice shields every 20-25 seconds
+            iceShieldSpawnTimer += deltaTime;
+            const iceShieldInterval = currentLevel.iceShieldInterval[0] + 
+                Math.random() * (currentLevel.iceShieldInterval[1] - currentLevel.iceShieldInterval[0]);
+            if (iceShieldSpawnTimer >= iceShieldInterval) {
+                spawnIceShield();
+                iceShieldSpawnTimer = 0;
+            }
+            
+            // Spawn double jumps every 25-30 seconds (after 20 seconds)
+            doubleJumpSpawnTimer += deltaTime;
+            const doubleJumpInterval = currentLevel.doubleJumpInterval[0] + 
+                Math.random() * (currentLevel.doubleJumpInterval[1] - currentLevel.doubleJumpInterval[0]);
+            if (doubleJumpSpawnTimer >= doubleJumpInterval && gameTime > 20000) {
+                spawnDoubleJump();
+                doubleJumpSpawnTimer = 0;
             }
             
             // Update obstacles
@@ -1305,13 +1273,11 @@
                     
                     handlePlayerHit(true);
                     obstacles.splice(i, 1);
-                    onScreenObstacles--;
                     continue;
                 }
                 
                 if (obstacles[i].x + obstacles[i].width < 0) {
                     obstacles.splice(i, 1);
-                    onScreenObstacles--;
                 }
             }
             
