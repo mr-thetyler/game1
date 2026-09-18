@@ -96,7 +96,7 @@ const GRAVITY = 0.6;
 const JUMP_FORCE = -13;
 const BASE_SCROLL_SPEED = 3;
 const LINE_SPACING = 80;
-const MAX_RADIUS = 120;
+const MAX_RADIUS = 160; // Game Over when hero fills the screen (diameter = GROUND_Y)
 const HITBOX_SHRINK = 0.9;
 const INVINCIBILITY_DURATION = 30;
 const HIT_ANIMATION_DURATION = 48;
