@@ -26,7 +26,7 @@ const levels = [
     birdFrequency: 0.3,
     platformFrequency: 1.2,
     speedGrowthRate: 0.008,
-    maxSpeedMultiplier: 3.0,
+    maxSpeedMultiplier: 1.5,
     coinMultiplier: 1.0
   },
   {
@@ -39,26 +39,26 @@ const levels = [
     birdFrequency: 0.6,
     platformFrequency: 0.9,
     speedGrowthRate: 0.010,
-    maxSpeedMultiplier: 3.0,
+    maxSpeedMultiplier: 2.0,
     coinMultiplier: 1.0
   },
   {
     id: 3,
     name: "Mountain Peak",
-    targetTime: 120,
+    targetTime: 90,
     background: "#E0E0E0",
     groundColor: "#696969",
     obstacleFrequency: 1.8,
     birdFrequency: 1.5,
     platformFrequency: 1.3,
     speedGrowthRate: 0.018,
-    maxSpeedMultiplier: 5.0,
+    maxSpeedMultiplier: 3.0,
     coinMultiplier: 0.9
   },
   {
     id: 4,
     name: "Volcanic Fury",
-    targetTime: 150,
+    targetTime: 90,
     background: "#2F1B1B",
     groundColor: "#8B0000",
     obstacleFrequency: 1.6,
@@ -71,14 +71,14 @@ const levels = [
   {
     id: 5,
     name: "Cosmic Void",
-    targetTime: 180,
+    targetTime: 90,
     background: "#0D0221",
     groundColor: "#4B0082",
     obstacleFrequency: 1.8,
     birdFrequency: 1.5,
     platformFrequency: 1.0,
     speedGrowthRate: 0.018,
-    maxSpeedMultiplier: 4.0,
+    maxSpeedMultiplier: 6.0,
     coinMultiplier: 0.9
   }
 ];
