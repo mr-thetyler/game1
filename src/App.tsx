@@ -32,6 +32,7 @@ const MAX_RADIUS = 120;
 const HITBOX_SHRINK = 0.9;
 const SPEED_CAP_MULTIPLIER = 3;
 const INVINCIBILITY_DURATION = 30; // 0.5s at 60fps
+const HIT_ANIMATION_DURATION = 48; // 0.8s at 60fps - "ouch" face duration
 const SCREEN_SHAKE_DURATION = 12; // 0.2s at 60fps
 const HIGH_SCORE_KEY = 'heroRunnerHighScore';
 
@@ -168,6 +169,9 @@ interface GameState {
   // Invincibility
   invincibilityTimer: number;
 
+  // Hit face animation (0.8s = 48 frames)
+  hitAnimationTimer: number;
+
   // Survival timer
   survivalTime: number;
 
@@ -236,6 +240,7 @@ function createInitialState(): GameState {
     screenShakeY: 0,
 
     invincibilityTimer: 0,
+    hitAnimationTimer: 0,
 
     survivalTime: 0,
 
@@ -407,8 +412,11 @@ function checkCollisions(state: GameState): void {
         state.squishTimer = 12;
         state.screenShakeTimer = SCREEN_SHAKE_DURATION;
         state.invincibilityTimer = INVINCIBILITY_DURATION;
+        state.hitAnimationTimer = HIT_ANIMATION_DURATION; // "Ouch!" face for 0.8s
 
         addParticles(state, obs.x + obs.width / 2, obs.y + obs.height / 2, '#ff4444', 8);
+        // "Ouch!" floating text above hero
+        addFloatingText(state, HERO_X, state.heroY - state.heroRadius - 15, 'Ouch!', '#ef4444');
         state.obstacles.splice(i, 1);
 
         if (state.heroRadius >= MAX_RADIUS) {
@@ -682,6 +690,7 @@ function App() {
     // --- Visual Effect Timers ---
     if (state.flashTimer > 0) state.flashTimer--;
     if (state.invincibilityTimer > 0) state.invincibilityTimer--;
+    if (state.hitAnimationTimer > 0) state.hitAnimationTimer--;
 
     // Screen shake
     if (state.screenShakeTimer > 0) {
@@ -1059,34 +1068,102 @@ function App() {
         ctx.fill();
       }
 
-      // Hero body
-      const heroColor = state.flashTimer > 0
-        ? `rgb(${Math.min(255, 37 + state.flashTimer * 15)}, ${Math.max(0, 99 - state.flashTimer * 5)}, ${Math.max(0, 235 - state.flashTimer * 15)})`
-        : '#2563eb';
+      // Hero body - red/orange during hit animation, otherwise blue
+      let heroColor: string;
+      if (state.hitAnimationTimer > 0) {
+        // Transition from red to orange during hit animation
+        const hitProgress = state.hitAnimationTimer / HIT_ANIMATION_DURATION;
+        const r = 239;
+        const g = Math.floor(68 + (1 - hitProgress) * 80);
+        const b = Math.floor(68 * (1 - hitProgress));
+        heroColor = `rgb(${r}, ${g}, ${b})`;
+      } else if (state.flashTimer > 0) {
+        heroColor = `rgb(${Math.min(255, 37 + state.flashTimer * 15)}, ${Math.max(0, 99 - state.flashTimer * 5)}, ${Math.max(0, 235 - state.flashTimer * 15)})`;
+      } else {
+        heroColor = '#2563eb';
+      }
+
       ctx.beginPath();
       ctx.arc(0, 0, state.heroRadius, 0, Math.PI * 2);
       ctx.fillStyle = heroColor;
       ctx.fill();
-      ctx.strokeStyle = '#1d4ed8';
+      ctx.strokeStyle = state.hitAnimationTimer > 0 ? '#991b1b' : '#1d4ed8';
       ctx.lineWidth = 3;
       ctx.stroke();
 
-      // Highlight
-      ctx.beginPath();
-      ctx.arc(-state.heroRadius * 0.25, -state.heroRadius * 0.25, state.heroRadius * 0.35, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-      ctx.fill();
+      // Highlight (skip during hit animation for more "hurt" look)
+      if (state.hitAnimationTimer <= 0) {
+        ctx.beginPath();
+        ctx.arc(-state.heroRadius * 0.25, -state.heroRadius * 0.25, state.heroRadius * 0.35, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+        ctx.fill();
+      }
 
-      // Eye
-      const eyeOffset = state.heroRadius * 0.3;
-      ctx.beginPath();
-      ctx.arc(eyeOffset, -eyeOffset * 0.5, state.heroRadius * 0.2, 0, Math.PI * 2);
-      ctx.fillStyle = '#fff';
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(eyeOffset + 2, -eyeOffset * 0.5, state.heroRadius * 0.1, 0, Math.PI * 2);
-      ctx.fillStyle = '#1a1a1a';
-      ctx.fill();
+      // --- FACE DRAWING ---
+      if (state.hitAnimationTimer > 0) {
+        // "OUCH" FACE: Two squeezed eyes (> <) and open "O" mouth
+        const r = state.heroRadius;
+        const eyeY = -r * 0.15;
+        const eyeSize = r * 0.2;
+
+        // Left squeezed eye: ">" shape (downward-curving arc)
+        ctx.strokeStyle = '#1a1a1a';
+        ctx.lineWidth = Math.max(2, r * 0.08);
+        ctx.lineCap = 'round';
+        // Left eye ">" - two lines forming a V pointing right
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.35 - eyeSize, eyeY - eyeSize * 0.7);
+        ctx.lineTo(-r * 0.35, eyeY);
+        ctx.lineTo(-r * 0.35 - eyeSize, eyeY + eyeSize * 0.7);
+        ctx.stroke();
+
+        // Right eye "<" - two lines forming a V pointing left
+        ctx.beginPath();
+        ctx.moveTo(r * 0.35 + eyeSize, eyeY - eyeSize * 0.7);
+        ctx.lineTo(r * 0.35, eyeY);
+        ctx.lineTo(r * 0.35 + eyeSize, eyeY + eyeSize * 0.7);
+        ctx.stroke();
+
+        // Open "O" mouth - oval shape showing shock/pain
+        const mouthY = r * 0.25;
+        const mouthW = r * 0.2;
+        const mouthH = r * 0.25;
+        // Mouth wobble based on animation progress
+        const wobble = Math.sin(state.hitAnimationTimer * 0.5) * r * 0.03;
+        ctx.beginPath();
+        ctx.ellipse(wobble, mouthY, mouthW, mouthH, 0, 0, Math.PI * 2);
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fill();
+        // Inner mouth (tongue/throat)
+        ctx.beginPath();
+        ctx.ellipse(wobble, mouthY + mouthH * 0.2, mouthW * 0.5, mouthH * 0.4, 0, 0, Math.PI * 2);
+        ctx.fillStyle = '#991b1b';
+        ctx.fill();
+
+        ctx.lineCap = 'butt'; // Reset line cap
+      } else {
+        // NORMAL FACE: One big white eye with black pupil + small smile
+        const eyeOffset = state.heroRadius * 0.3;
+        // Eye white
+        ctx.beginPath();
+        ctx.arc(eyeOffset, -eyeOffset * 0.5, state.heroRadius * 0.2, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+        // Pupil
+        ctx.beginPath();
+        ctx.arc(eyeOffset + 2, -eyeOffset * 0.5, state.heroRadius * 0.1, 0, Math.PI * 2);
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fill();
+
+        // Small smile (neutral/happy mouth)
+        ctx.strokeStyle = '#1a1a1a';
+        ctx.lineWidth = Math.max(1.5, state.heroRadius * 0.06);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.arc(eyeOffset * 0.3, state.heroRadius * 0.15, state.heroRadius * 0.15, 0.1 * Math.PI, 0.9 * Math.PI);
+        ctx.stroke();
+        ctx.lineCap = 'butt';
+      }
     }
 
     ctx.restore();
@@ -1131,13 +1208,22 @@ function App() {
     ctx.textAlign = 'center';
     ctx.fillText(`⏱ ${formatTime(state.survivalTime)}`, CANVAS_WIDTH / 2, 36);
 
+    // Speed multiplier indicator
+    const speedMultiplier = (state.scrollSpeed / state.baseSpeed).toFixed(1);
+    const speedColor = state.scrollSpeed >= state.baseSpeed * 2.5 ? '#ef4444' :
+                       state.scrollSpeed >= state.baseSpeed * 1.5 ? '#f59e0b' : '#22c55e';
+    ctx.fillStyle = speedColor;
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(`⚡ Speed: x${speedMultiplier}`, CANVAS_WIDTH / 2, 52);
+
     // Double jump timer indicator
     if (state.doubleJumpActive) {
       const djSecondsLeft = Math.ceil(state.doubleJumpTimer / 60);
       ctx.fillStyle = '#a855f7';
       ctx.font = 'bold 14px Arial';
       ctx.textAlign = 'center';
-      ctx.fillText(`2x JUMP: ${djSecondsLeft}s`, CANVAS_WIDTH / 2, 52);
+      ctx.fillText(`2x JUMP: ${djSecondsLeft}s`, CANVAS_WIDTH / 2, 68);
     }
 
     // --- UI: Size percentage ---
