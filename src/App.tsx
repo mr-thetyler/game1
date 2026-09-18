@@ -638,6 +638,7 @@ function addSpeedLine(state: GameState): void {
 // ==================== COLLISION DETECTION ====================
 
 function handleObstacleHit(state: GameState, obsX: number, obsY: number): void {
+  console.log(`[HANDLE OBSTACLE HIT CALLED] Current radius: ${state.heroRadius.toFixed(2)}`);
   if (state.iceShieldActive) {
     state.iceShieldActive = false;
     state.iceShieldTimer = 0;
@@ -649,11 +650,12 @@ function handleObstacleHit(state: GameState, obsX: number, obsY: number): void {
   }
 
   // FIX #2: Hero grows on hit
+  console.log(`[BEFORE HIT] Hero radius: ${state.heroRadius.toFixed(2)}`);
   state.heroRadius *= 1.32;
+  console.log(`[AFTER HIT] Hero radius: ${state.heroRadius.toFixed(2)} / ${MAX_RADIUS}`);
   if (state.heroRadius > state.maxRadiusReached) {
     state.maxRadiusReached = state.heroRadius;
   }
-  console.log(`[HIT] Hero radius: ${state.heroRadius.toFixed(2)} / ${MAX_RADIUS}`);
 
   state.flashTimer = 15;
   state.squishTimer = 12;
@@ -676,6 +678,10 @@ function handleObstacleHit(state: GameState, obsX: number, obsY: number): void {
 
 function checkCollisions(state: GameState): void {
   const heroR = state.heroRadius * HITBOX_SHRINK;
+
+  if (state.frameCount % 60 === 0) {
+    console.log(`[CHECK COLLISIONS] heroRadius: ${state.heroRadius.toFixed(2)}, heroR: ${heroR.toFixed(2)}, invincible: ${state.invincibilityTimer > 0}`);
+  }
 
   if (state.invincibilityTimer <= 0) {
     for (let i = state.obstacles.length - 1; i >= 0; i--) {
