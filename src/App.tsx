@@ -1,72 +1,24 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 
 /**
- * Hero Runner - HTML5 Canvas Game with Level System
+ * Hero Runner - HTML5 Canvas Game (Enhanced Edition v4)
  * 
- * All existing mechanics preserved + Level system added
+ * Features:
+ * - Blue circle hero with gravity & jump (Space/Click)
+ * - Red obstacles: hero grows +15%, screen shake, invincibility frames
+ * - Red flying obstacles (birds): fly horizontally with slight vertical drift
+ * - Green shrinkers: hero shrinks -20%, +5 score
+ * - Yellow coins: +10 score with floating text
+ * - GOLD coins (high-altitude): +25 score, need platforms to reach
+ * - PURPLE double-jump power-up: 15s of mid-air second jump
+ * - BLUE ice shield power-up: 10s, blocks first obstacle hit
+ * - PLATFORMS: brown wooden platforms hero can stand on, break after 1s
+ * - Game Over when radius >= 120px
+ * - Continuous difficulty scaling (speed +4% every 3s, capped at 3x)
+ * - Pause system (P/Esc)
+ * - Local high score (localStorage)
+ * - Survival timer, screen shake, invincibility frames, hit face animation
  */
-
-// ==================== LEVEL DATA ====================
-const levels = [
-  {
-    id: 1,
-    name: "Forest Meadow",
-    targetTime: 60,
-    background: "#87CEEB",
-    groundColor: "#228B22",
-    obstacleFrequency: 1.0,
-    birdFrequency: 0.3,
-    platformFrequency: 1.2,
-    speedGrowthRate: 0.008
-  },
-  {
-    id: 2,
-    name: "Desert Dunes",
-    targetTime: 90,
-    background: "#FFE4B5",
-    groundColor: "#D2691E",
-    obstacleFrequency: 1.2,
-    birdFrequency: 0.6,
-    platformFrequency: 0.9,
-    speedGrowthRate: 0.010
-  },
-  {
-    id: 3,
-    name: "Mountain Peak",
-    targetTime: 120,
-    background: "#E0E0E0",
-    groundColor: "#696969",
-    obstacleFrequency: 1.4,
-    birdFrequency: 0.9,
-    platformFrequency: 1.1,
-    speedGrowthRate: 0.012
-  },
-  {
-    id: 4,
-    name: "Volcanic Fury",
-    targetTime: 150,
-    background: "#2F1B1B",
-    groundColor: "#8B0000",
-    obstacleFrequency: 1.6,
-    birdFrequency: 1.2,
-    platformFrequency: 0.8,
-    speedGrowthRate: 0.015
-  },
-  {
-    id: 5,
-    name: "Cosmic Void",
-    targetTime: 180,
-    background: "#0D0221",
-    groundColor: "#4B0082",
-    obstacleFrequency: 1.8,
-    birdFrequency: 1.5,
-    platformFrequency: 1.0,
-    speedGrowthRate: 0.018
-  }
-];
-
-// ==================== GAME STATES ====================
-type GameScreen = 'MENU' | 'PLAYING' | 'PAUSED' | 'LEVEL_COMPLETE' | 'GAME_OVER';
 
 // ==================== CONSTANTS ====================
 const CANVAS_WIDTH = 800;
@@ -85,7 +37,6 @@ const INVINCIBILITY_DURATION = 30;
 const HIT_ANIMATION_DURATION = 48;
 const SCREEN_SHAKE_DURATION = 12;
 const HIGH_SCORE_KEY = 'heroRunnerHighScore';
-const PROGRESS_KEY = 'heroRunnerProgress';
 
 const PLATFORM_BREAK_TIME = 60;
 const PLATFORM_CRACK_START = 36;
@@ -100,14 +51,14 @@ const ICE_SHIELD_DURATION = 600;
 const ICE_SHIELD_SPAWN_MIN = 720;
 const ICE_SHIELD_SPAWN_MAX = 1080;
 
-const FLYING_OBSTACLE_SPAWN_MIN = 300; // 5 seconds
-const FLYING_OBSTACLE_SPAWN_MAX = 600; // 10 seconds
-const FLYING_OBSTACLE_FIRST_DELAY = 600; // 10 seconds before first spawn
-const FLYING_OBSTACLE_BASE_SPEED = 4; // Base horizontal speed in pixels per frame
-const FLYING_OBSTACLE_SAFE_DISTANCE = 150; // Minimum distance from ground obstacles
+const FLYING_OBSTACLE_SPAWN_MIN = 300;
+const FLYING_OBSTACLE_SPAWN_MAX = 600;
+const FLYING_OBSTACLE_FIRST_DELAY = 600;
+const FLYING_OBSTACLE_BASE_SPEED = 4;
+const FLYING_OBSTACLE_SAFE_DISTANCE = 150;
 const FLYING_OBSTACLE_WIDTH = 30;
 const FLYING_OBSTACLE_HEIGHT = 20;
-const FLYING_OBSTACLE_HITBOX = 20; // Smaller than visual for forgiving collision
+const FLYING_OBSTACLE_HITBOX = 20;
 
 // ==================== TYPES ====================
 interface Obstacle {
@@ -123,8 +74,8 @@ interface FlyingObstacle {
   width: number;
   height: number;
   velocityX: number;
-  verticalDrift: number; // Slight up/down drift (-1 to +1)
-  rotation: number; // Visual tilt based on drift
+  verticalDrift: number;
+  rotation: number;
   wingPhase: number;
 }
 
@@ -251,6 +202,8 @@ interface GameState {
 // ==================== HELPER FUNCTIONS ====================
 
 function createInitialState(): GameState {
+  const highScore = parseInt(localStorage.getItem(HIGH_SCORE_KEY) || '0', 10);
+
   return {
     heroY: GROUND_Y - INITIAL_RADIUS,
     velocityY: 0,
@@ -283,7 +236,7 @@ function createInitialState(): GameState {
     speedLines: [],
 
     score: 0,
-    highScore: 0,
+    highScore: highScore,
     isNewRecord: false,
 
     obstacleTimer: 0,
@@ -367,29 +320,22 @@ function spawnObstacle(state: GameState): void {
 }
 
 function spawnFlyingObstacle(state: GameState): void {
-  // Don't spawn birds in first 10 seconds
   if (state.survivalTime < FLYING_OBSTACLE_FIRST_DELAY) return;
 
   const speedMultiplier = state.scrollSpeed / state.baseSpeed;
   const spawnX = CANVAS_WIDTH + 50;
 
-  // Determine spawn height based on distribution:
-  // 60% medium (100-200), 25% high (50-100), 15% low (200-250)
   const tier = Math.random();
   let startY: number;
   
   if (tier < 0.60) {
-    // Medium height (60%)
     startY = randomRange(100, 200);
   } else if (tier < 0.85) {
-    // High height (25%)
     startY = randomRange(50, 100);
   } else {
-    // Low height (15%)
     startY = randomRange(200, 250);
   }
 
-  // Safe spawning: check if there's a ground obstacle within 150px of bird's Y position
   const hasNearbyObstacle = state.obstacles.some(obs => {
     const obsCenterY = obs.y + obs.height / 2;
     return Math.abs(startY - obsCenterY) < FLYING_OBSTACLE_SAFE_DISTANCE;
@@ -397,14 +343,9 @@ function spawnFlyingObstacle(state: GameState): void {
 
   if (hasNearbyObstacle) return;
 
-  // Horizontal movement (right to left)
   const velocityX = -(FLYING_OBSTACLE_BASE_SPEED * speedMultiplier);
-  
-  // Slight vertical drift (-1 to +1 pixels per frame)
-  const verticalDrift = (Math.random() * 2 - 1); // Random between -1 and +1
-  
-  // Rotation based on drift (tilt up when drifting up, down when drifting down)
-  const rotation = verticalDrift * 0.15; // Small angle in radians
+  const verticalDrift = (Math.random() * 2 - 1);
+  const rotation = verticalDrift * 0.15;
 
   state.flyingObstacles.push({
     x: spawnX,
@@ -563,6 +504,11 @@ function handleObstacleHit(state: GameState, obsX: number, obsY: number): void {
 
   if (state.heroRadius >= MAX_RADIUS) {
     state.isGameOver = true;
+    if (state.score > state.highScore) {
+      state.highScore = state.score;
+      state.isNewRecord = true;
+      localStorage.setItem(HIGH_SCORE_KEY, state.score.toString());
+    }
   }
 }
 
@@ -632,6 +578,8 @@ function checkCollisions(state: GameState): void {
   }
 }
 
+// ==================== PLATFORM COLLISION ====================
+
 function checkPlatformLanding(state: GameState): Platform | null {
   if (state.velocityY <= 0) return null;
 
@@ -661,55 +609,10 @@ function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<GameState>(createInitialState());
   const animFrameRef = useRef<number>(0);
-  
-  const [currentScreen, setCurrentScreen] = useState<GameScreen>('MENU');
-  const [currentLevel, setCurrentLevel] = useState(1);
-  const [levelTimeRemaining, setLevelTimeRemaining] = useState(0);
-  const [unlockedLevels, setUnlockedLevels] = useState<number[]>([1]);
-  const [completedLevels, setCompletedLevels] = useState<number[]>([]);
-  const [levelBestScores, setLevelBestScores] = useState<{[key: number]: number}>({});
-  const [showLevelAnnouncement, setShowLevelAnnouncement] = useState(false);
-  const [levelStars, setLevelStars] = useState(0);
-
-  // Load progress from localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem(PROGRESS_KEY);
-    if (saved) {
-      const progress = JSON.parse(saved);
-      if (progress.unlockedLevels) setUnlockedLevels(progress.unlockedLevels);
-      if (progress.completedLevels) setCompletedLevels(progress.completedLevels);
-      if (progress.levelBestScores) setLevelBestScores(progress.levelBestScores);
-    }
-  }, []);
-
-  // Save progress to localStorage
-  const saveProgress = useCallback(() => {
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
-      unlockedLevels,
-      completedLevels,
-      levelBestScores
-    }));
-  }, [unlockedLevels, completedLevels, levelBestScores]);
-
-  const startLevel = useCallback((levelId: number) => {
-    setCurrentLevel(levelId);
-    const level = levels[levelId - 1];
-    setLevelTimeRemaining(level.targetTime);
-    
-    stateRef.current = createInitialState();
-    stateRef.current.highScore = levelBestScores[levelId] || 0;
-    
-    setCurrentScreen('PLAYING');
-    setShowLevelAnnouncement(true);
-    
-    setTimeout(() => {
-      setShowLevelAnnouncement(false);
-    }, 2000);
-  }, [levelBestScores]);
 
   const handleJump = useCallback(() => {
     const state = stateRef.current;
-    if (currentScreen !== 'PLAYING' || state.isGameOver || state.isPaused) return;
+    if (state.isGameOver || state.isPaused) return;
 
     if (state.isGrounded || state.onPlatform) {
       state.velocityY = JUMP_FORCE;
@@ -721,62 +624,25 @@ function App() {
       state.hasDoubleJumped = true;
       addParticles(state, HERO_X, state.heroY, '#c084fc', 8);
     }
-  }, [currentScreen]);
+  }, []);
 
   const handleRestart = useCallback(() => {
-    startLevel(currentLevel);
-  }, [currentLevel, startLevel]);
-
-  const goToMenu = useCallback(() => {
-    setCurrentScreen('MENU');
+    stateRef.current = createInitialState();
   }, []);
 
   const togglePause = useCallback(() => {
     const state = stateRef.current;
-    if (state.isGameOver || currentScreen !== 'PLAYING') return;
+    if (state.isGameOver) return;
     state.isPaused = !state.isPaused;
-    setCurrentScreen(state.isPaused ? 'PAUSED' : 'PLAYING');
-  }, [currentScreen]);
+  }, []);
 
-  const update = useCallback((state: GameState, level: typeof levels[0]) => {
+  // ==================== UPDATE ====================
+  const update = useCallback((state: GameState) => {
     if (state.isGameOver || state.isPaused) return;
 
     state.frameCount++;
     state.survivalTime++;
 
-    // Update level timer
-    setLevelTimeRemaining(prev => {
-      const newTime = prev - (1/60);
-      if (newTime <= 0) {
-        // Level complete!
-        const stars = calculateStars(state.score, state.heroRadius);
-        setLevelStars(stars);
-        
-        // Update best score
-        const currentBest = levelBestScores[level.id] || 0;
-        if (state.score > currentBest) {
-          const newScores = {...levelBestScores, [level.id]: state.score};
-          setLevelBestScores(newScores);
-        }
-        
-        // Unlock next level
-        if (!completedLevels.includes(level.id)) {
-          const newCompleted = [...completedLevels, level.id];
-          setCompletedLevels(newCompleted);
-          
-          if (level.id < 5 && !unlockedLevels.includes(level.id + 1)) {
-            const newUnlocked = [...unlockedLevels, level.id + 1];
-            setUnlockedLevels(newUnlocked);
-          }
-        }
-        
-        setCurrentScreen('LEVEL_COMPLETE');
-        return 0;
-      }
-      return newTime;
-    });
-
-    // Hero Physics
     state.velocityY += GRAVITY;
     state.heroY += state.velocityY;
 
@@ -824,7 +690,6 @@ function App() {
       }
     }
 
-    // Double Jump Timer
     if (state.doubleJumpActive) {
       state.doubleJumpTimer--;
       if (state.doubleJumpTimer <= 0) {
@@ -834,7 +699,6 @@ function App() {
     }
     if (state.doubleJumpReadyTimer > 0) state.doubleJumpReadyTimer--;
 
-    // Ice Shield Timer
     if (state.iceShieldActive) {
       state.iceShieldTimer--;
       if (state.iceShieldTimer <= 0) {
@@ -842,13 +706,11 @@ function App() {
       }
     }
 
-    // Background Scroll
     state.scrollOffset += state.scrollSpeed;
     if (state.scrollOffset >= LINE_SPACING) {
       state.scrollOffset -= LINE_SPACING;
     }
 
-    // Move Entities
     for (let i = state.obstacles.length - 1; i >= 0; i--) {
       state.obstacles[i].x -= state.scrollSpeed;
       if (state.obstacles[i].x + state.obstacles[i].width < -50) state.obstacles.splice(i, 1);
@@ -856,13 +718,10 @@ function App() {
 
     for (let i = state.flyingObstacles.length - 1; i >= 0; i--) {
       const bird = state.flyingObstacles[i];
-      // Horizontal movement (right to left)
       bird.x += bird.velocityX;
-      // Slight vertical drift
       bird.y += bird.verticalDrift;
       bird.wingPhase += 0.2;
 
-      // Remove bird when it goes off-screen
       if (bird.x < -50 || bird.y > CANVAS_HEIGHT || bird.y < -100) {
         state.flyingObstacles.splice(i, 1);
       }
@@ -893,7 +752,6 @@ function App() {
       }
     }
 
-    // Update Floating Texts
     for (let i = state.floatingTexts.length - 1; i >= 0; i--) {
       const ft = state.floatingTexts[i];
       ft.y += ft.velocityY;
@@ -901,7 +759,6 @@ function App() {
       if (ft.alpha <= 0) state.floatingTexts.splice(i, 1);
     }
 
-    // Update Particles
     for (let i = state.particles.length - 1; i >= 0; i--) {
       const p = state.particles[i];
       p.x += p.vx;
@@ -912,7 +769,6 @@ function App() {
       if (p.life <= 0) state.particles.splice(i, 1);
     }
 
-    // Update Speed Lines
     for (let i = state.speedLines.length - 1; i >= 0; i--) {
       const sl = state.speedLines[i];
       sl.x -= sl.speed;
@@ -924,7 +780,6 @@ function App() {
       addSpeedLine(state);
     }
 
-    // Visual Effect Timers
     if (state.flashTimer > 0) state.flashTimer--;
     if (state.invincibilityTimer > 0) state.invincibilityTimer--;
     if (state.hitAnimationTimer > 0) state.hitAnimationTimer--;
@@ -948,13 +803,12 @@ function App() {
       state.squishScaleY = 1;
     }
 
-    // CONTINUOUS DIFFICULTY SCALING with level-specific rate
     state.speedTimer++;
     if (state.speedTimer >= 180) {
       state.speedTimer = 0;
       const maxSpeed = state.baseSpeed * SPEED_CAP_MULTIPLIER;
       if (state.scrollSpeed < maxSpeed) {
-        state.scrollSpeed *= (1 + level.speedGrowthRate);
+        state.scrollSpeed *= 1.04;
         if (state.scrollSpeed > maxSpeed) state.scrollSpeed = maxSpeed;
       }
     }
@@ -965,9 +819,8 @@ function App() {
       state.minObstacleInterval = Math.max(36, state.minObstacleInterval - 6);
     }
 
-    // Spawn Timers with level frequencies
     state.obstacleTimer++;
-    if (state.obstacleTimer >= state.obstacleInterval / level.obstacleFrequency) {
+    if (state.obstacleTimer >= state.obstacleInterval) {
       state.obstacleTimer = 0;
       spawnObstacle(state);
       state.obstacleInterval = randomRange(state.minObstacleInterval, state.minObstacleInterval + 60);
@@ -977,7 +830,7 @@ function App() {
     const speedMultiplier = state.scrollSpeed / state.baseSpeed;
     const flyingIntervalAdjusted = Math.max(
       120,
-      Math.floor(state.flyingObstacleInterval / (1 + speedMultiplier * 0.15)) / level.birdFrequency
+      Math.floor(state.flyingObstacleInterval / (1 + speedMultiplier * 0.15))
     );
     if (state.flyingObstacleTimer >= flyingIntervalAdjusted) {
       state.flyingObstacleTimer = 0;
@@ -1005,7 +858,7 @@ function App() {
     }
 
     state.platformTimer++;
-    const platformIntervalAdjusted = Math.max(60, state.platformInterval - Math.floor(state.scrollSpeed * 5)) / level.platformFrequency;
+    const platformIntervalAdjusted = Math.max(60, state.platformInterval - Math.floor(state.scrollSpeed * 5));
     if (state.platformTimer >= platformIntervalAdjusted) {
       state.platformTimer = 0;
       spawnPlatform(state);
@@ -1027,35 +880,19 @@ function App() {
     }
 
     checkCollisions(state);
+  }, []);
 
-    if (state.isGameOver) {
-      // Update best score
-      const currentBest = levelBestScores[currentLevel] || 0;
-      if (state.score > currentBest) {
-        const newScores = {...levelBestScores, [currentLevel]: state.score};
-        setLevelBestScores(newScores);
-        state.isNewRecord = true;
-        state.highScore = state.score;
-      } else {
-        state.highScore = currentBest;
-      }
-      
-      setCurrentScreen('GAME_OVER');
-    }
-  }, [currentLevel, levelBestScores, completedLevels, unlockedLevels]);
-
-  const draw = useCallback((ctx: CanvasRenderingContext2D, state: GameState, level: typeof levels[0]) => {
+  // ==================== DRAW ====================
+  const draw = useCallback((ctx: CanvasRenderingContext2D, state: GameState) => {
     ctx.save();
 
     if (state.screenShakeTimer > 0) {
       ctx.translate(state.screenShakeX, state.screenShakeY);
     }
 
-    // Background (level-specific)
-    ctx.fillStyle = level.background;
+    ctx.fillStyle = '#d1d5db';
     ctx.fillRect(-5, -5, CANVAS_WIDTH + 10, CANVAS_HEIGHT + 10);
 
-    // Scrolling Background Lines
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
     ctx.lineWidth = 2;
     const numLines = Math.ceil(CANVAS_WIDTH / LINE_SPACING) + 2;
@@ -1067,7 +904,6 @@ function App() {
       ctx.stroke();
     }
 
-    // Speed Lines
     for (const sl of state.speedLines) {
       ctx.globalAlpha = Math.max(0, sl.alpha);
       ctx.strokeStyle = 'rgba(100, 100, 100, 0.5)';
@@ -1079,8 +915,7 @@ function App() {
     }
     ctx.globalAlpha = 1;
 
-    // Ground (level-specific)
-    ctx.fillStyle = level.groundColor;
+    ctx.fillStyle = '#1f2937';
     ctx.fillRect(0, GROUND_Y, CANVAS_WIDTH, CANVAS_HEIGHT - GROUND_Y);
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 3;
@@ -1089,7 +924,6 @@ function App() {
     ctx.lineTo(CANVAS_WIDTH, GROUND_Y);
     ctx.stroke();
 
-    // Platforms
     for (const plat of state.platforms) {
       if (plat.crackLevel >= 3) continue;
 
@@ -1146,7 +980,6 @@ function App() {
       }
     }
 
-    // Ground Obstacles
     for (const obs of state.obstacles) {
       ctx.fillStyle = '#dc2626';
       ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
@@ -1162,32 +995,26 @@ function App() {
       ctx.strokeRect(obs.x, obs.y, obs.width, obs.height);
     }
 
-    // Flying Obstacles (Birds) - Horizontal flight with slight vertical drift
     for (const bird of state.flyingObstacles) {
       ctx.save();
       ctx.translate(bird.x, bird.y);
-      
-      // Apply rotation based on vertical drift
       ctx.rotate(bird.rotation);
 
-      // Draw bird body as red diamond/triangle pointing left
       ctx.fillStyle = '#dc2626';
       ctx.beginPath();
-      ctx.moveTo(-bird.width / 2, 0);  // Left point (nose)
-      ctx.lineTo(0, -bird.height / 2);  // Top point
-      ctx.lineTo(bird.width / 2, 0);    // Right point (tail)
-      ctx.lineTo(0, bird.height / 2);   // Bottom point
+      ctx.moveTo(-bird.width / 2, 0);
+      ctx.lineTo(0, -bird.height / 2);
+      ctx.lineTo(bird.width / 2, 0);
+      ctx.lineTo(0, bird.height / 2);
       ctx.closePath();
       ctx.fill();
       ctx.strokeStyle = '#991b1b';
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // Draw animated wings
       const wingOffset = Math.sin(bird.wingPhase) * bird.height * 0.4;
       ctx.fillStyle = '#ef4444';
       
-      // Top wing
       ctx.beginPath();
       ctx.moveTo(-bird.width * 0.2, -bird.height * 0.1);
       ctx.lineTo(0, -bird.height * 0.5 - wingOffset);
@@ -1196,7 +1023,6 @@ function App() {
       ctx.fill();
       ctx.stroke();
 
-      // Bottom wing
       ctx.beginPath();
       ctx.moveTo(-bird.width * 0.2, bird.height * 0.1);
       ctx.lineTo(0, bird.height * 0.5 + wingOffset);
@@ -1208,7 +1034,6 @@ function App() {
       ctx.restore();
     }
 
-    // Coins
     for (const coin of state.coins) {
       if (coin.type === 'doubleJump') {
         const pulse = Math.sin(state.frameCount * 0.15) * 3 + 3;
@@ -1324,7 +1149,6 @@ function App() {
       }
     }
 
-    // Shrinkers
     for (const shrinker of state.shrinkers) {
       const pulse = Math.sin(state.frameCount * 0.1) * 3 + 3;
       ctx.beginPath();
@@ -1345,7 +1169,6 @@ function App() {
       ctx.fillText('−', shrinker.x, shrinker.y);
     }
 
-    // Particles
     for (const p of state.particles) {
       ctx.globalAlpha = Math.max(0, p.alpha);
       ctx.beginPath();
@@ -1355,7 +1178,6 @@ function App() {
     }
     ctx.globalAlpha = 1;
 
-    // Hero
     ctx.save();
     ctx.translate(HERO_X, state.heroY);
     ctx.scale(state.squishScaleX, state.squishScaleY);
@@ -1480,7 +1302,6 @@ function App() {
 
     ctx.restore();
 
-    // Floating Texts
     for (const ft of state.floatingTexts) {
       ctx.globalAlpha = Math.max(0, ft.alpha);
       ctx.fillStyle = ft.color;
@@ -1502,9 +1323,137 @@ function App() {
       ctx.globalAlpha = 1;
     }
 
+    ctx.fillStyle = '#1f2937';
+    ctx.font = 'bold 20px Arial';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(`Score: ${state.score}`, 15, 12);
+
+    ctx.fillStyle = '#6b7280';
+    ctx.font = '14px Arial';
+    ctx.fillText(`Best: ${state.highScore}`, 15, 36);
+
+    ctx.fillStyle = '#4b5563';
+    ctx.font = '14px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(`⏱ ${formatTime(state.survivalTime)}`, CANVAS_WIDTH / 2, 36);
+
+    const speedMultiplier = (state.scrollSpeed / state.baseSpeed).toFixed(1);
+    const speedColor = state.scrollSpeed >= state.baseSpeed * 2.5 ? '#ef4444' :
+                       state.scrollSpeed >= state.baseSpeed * 1.5 ? '#f59e0b' : '#22c55e';
+    ctx.fillStyle = speedColor;
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(`⚡ Speed: x${speedMultiplier}`, CANVAS_WIDTH / 2, 52);
+
+    if (state.doubleJumpActive) {
+      const djSecondsLeft = Math.ceil(state.doubleJumpTimer / 60);
+      ctx.fillStyle = '#a855f7';
+      ctx.font = 'bold 14px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(`2x JUMP: ${djSecondsLeft}s`, CANVAS_WIDTH / 2, 68);
+    }
+
+    if (state.iceShieldActive) {
+      const shieldSecondsLeft = Math.ceil(state.iceShieldTimer / 60);
+      ctx.fillStyle = '#06b6d4';
+      ctx.font = 'bold 14px Arial';
+      ctx.textAlign = 'left';
+      ctx.fillText(`🛡️ SHIELD: ${shieldSecondsLeft}s`, 15, 54);
+    }
+
+    const sizePercent = Math.round((state.heroRadius / MAX_RADIUS) * 100);
+    ctx.fillStyle = '#1f2937';
+    ctx.font = 'bold 20px Arial';
+    ctx.textAlign = 'right';
+    ctx.fillText(`Size: ${sizePercent}%`, CANVAS_WIDTH - 15, 12);
+
+    const barX = 150;
+    const barY = 12;
+    const barWidth = CANVAS_WIDTH - 300;
+    const barHeight = 18;
+    const fillWidth = (state.heroRadius / MAX_RADIUS) * barWidth;
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.fillRect(barX, barY, barWidth, barHeight);
+
+    let barColor: string;
+    if (sizePercent < 50) barColor = '#22c55e';
+    else if (sizePercent < 80) barColor = '#eab308';
+    else barColor = '#ef4444';
+
+    ctx.fillStyle = barColor;
+    ctx.fillRect(barX, barY, Math.min(fillWidth, barWidth), barHeight);
+
+    ctx.strokeStyle = '#374151';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(barX, barY, barWidth, barHeight);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('DANGER', barX + barWidth / 2, barY + barHeight / 2);
+
     ctx.restore();
+
+    if (state.isPaused) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 48px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('⏸ PAUSED', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 40);
+
+      ctx.fillStyle = '#9ca3af';
+      ctx.font = '18px Arial';
+      ctx.fillText('Press P or Esc to resume', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 10);
+
+      ctx.fillStyle = '#e5e7eb';
+      ctx.font = '16px Arial';
+      ctx.fillText(`Score: ${state.score}  |  Size: ${sizePercent}%  |  Time: ${formatTime(state.survivalTime)}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 50);
+    }
+
+    if (state.isGameOver) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+      ctx.fillStyle = '#ef4444';
+      ctx.font = 'bold 48px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('GAME OVER', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 80);
+
+      ctx.fillStyle = '#fff';
+      ctx.font = '24px Arial';
+      ctx.fillText(`Final Score: ${state.score}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 30);
+
+      if (state.isNewRecord) {
+        const pulse = Math.sin(state.frameCount * 0.08) * 0.3 + 0.7;
+        ctx.fillStyle = `rgba(251, 191, 36, ${pulse})`;
+        ctx.font = 'bold 22px Arial';
+        ctx.fillText(`🏆 NEW RECORD! Best: ${state.highScore}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 5);
+      } else {
+        ctx.fillStyle = '#9ca3af';
+        ctx.font = '18px Arial';
+        ctx.fillText(`Best Score: ${state.highScore}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 5);
+      }
+
+      ctx.fillStyle = '#d1d5db';
+      ctx.font = '18px Arial';
+      ctx.fillText(`Max Size: ${Math.round(state.maxRadiusReached)}px`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 40);
+      ctx.fillText(`Time Survived: ${formatTime(state.survivalTime)}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 65);
+
+      ctx.fillStyle = '#6b7280';
+      ctx.font = '16px Arial';
+      ctx.fillText('Press R or Click to Restart', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 105);
+    }
+
   }, []);
 
+  // ==================== GAME LOOP ====================
   const gameLoop = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1512,24 +1461,19 @@ function App() {
     if (!ctx) return;
 
     const state = stateRef.current;
-    const level = levels[currentLevel - 1];
-    
-    if (currentScreen === 'PLAYING') {
-      update(state, level);
-      draw(ctx, state, level);
-    }
+    update(state);
+    draw(ctx, state);
 
     if (state.isPaused || state.isGameOver) {
       state.frameCount++;
     }
 
     animFrameRef.current = requestAnimationFrame(gameLoop);
-  }, [update, draw, currentLevel, currentScreen]);
+  }, [update, draw]);
 
+  // ==================== EFFECTS & EVENT LISTENERS ====================
   useEffect(() => {
-    if (currentScreen === 'PLAYING') {
-      animFrameRef.current = requestAnimationFrame(gameLoop);
-    }
+    animFrameRef.current = requestAnimationFrame(gameLoop);
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const state = stateRef.current;
@@ -1583,208 +1527,35 @@ function App() {
       window.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('touchstart', handleTouchStart);
     };
-  }, [gameLoop, handleJump, handleRestart, togglePause, currentScreen]);
+  }, [gameLoop, handleJump, handleRestart, togglePause]);
 
-  // Save progress whenever it changes
-  useEffect(() => {
-    saveProgress();
-  }, [unlockedLevels, completedLevels, levelBestScores, saveProgress]);
-
-  const calculateStars = (score: number, heroRadius: number): number => {
-    const sizePercent = (heroRadius / MAX_RADIUS) * 100;
-    if (score > 1000 && sizePercent < 50) return 3;
-    if (score > 500 && sizePercent < 80) return 2;
-    return 1;
-  };
-
-  const getDifficultyStars = (level: typeof levels[0]): string => {
-    const difficulty = level.obstacleFrequency + level.birdFrequency;
-    if (difficulty < 1.5) return '★☆☆';
-    if (difficulty < 2.5) return '★★☆';
-    return '★★★';
-  };
-
+  // ==================== RENDER ====================
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center p-4 select-none">
-      {currentScreen === 'MENU' && (
-        <div className="text-center">
-          <h1 className="text-5xl font-bold text-white mb-8">🏃 Hero Runner</h1>
-          <div className="grid grid-cols-3 gap-4 mb-8">
-            {levels.map((level) => {
-              const isUnlocked = unlockedLevels.includes(level.id);
-              const isCompleted = completedLevels.includes(level.id);
-              const bestScore = levelBestScores[level.id] || 0;
-              
-              return (
-                <div
-                  key={level.id}
-                  className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
-                    isUnlocked
-                      ? isCompleted
-                        ? 'bg-blue-900 border-blue-500 hover:bg-blue-800'
-                        : 'bg-gray-800 border-gray-600 hover:bg-gray-700'
-                      : 'bg-gray-900 border-gray-800 opacity-50 cursor-not-allowed'
-                  }`}
-                  onClick={() => isUnlocked && startLevel(level.id)}
-                >
-                  <div className="text-white font-bold text-lg mb-2">
-                    {level.name}
-                    {isCompleted && ' ✓'}
-                    {!isUnlocked && ' 🔒'}
-                  </div>
-                  <div className="text-gray-300 text-sm mb-1">
-                    Target: {level.targetTime}s
-                  </div>
-                  <div className="text-yellow-400 text-sm mb-1">
-                    {getDifficultyStars(level)}
-                  </div>
-                  {bestScore > 0 && (
-                    <div className="text-green-400 text-xs">
-                      Best: {bestScore}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {currentScreen === 'PLAYING' && (
-        <div className="relative">
-          {showLevelAnnouncement && (
-            <div className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none">
-              <div className="text-5xl font-bold text-white animate-pulse">
-                Level {currentLevel}: {levels[currentLevel - 1].name}
-              </div>
-            </div>
-          )}
-          
-          <div className="absolute top-2 left-2 text-white text-sm z-10">
-            <div>Score: {stateRef.current.score}</div>
-            <div>Best: {stateRef.current.highScore}</div>
-          </div>
-          
-          <div className="absolute top-2 right-2 text-white text-sm z-10 text-right">
-            <div>Size: {Math.round((stateRef.current.heroRadius / MAX_RADIUS) * 100)}%</div>
-            <div>Speed: x{(stateRef.current.scrollSpeed / stateRef.current.baseSpeed).toFixed(1)}</div>
-          </div>
-          
-          <div className="absolute top-2 left-1/2 transform -translate-x-1/2 text-center z-10">
-            <div className="text-white text-lg font-bold">
-              Level {currentLevel}: {levels[currentLevel - 1].name}
-            </div>
-            <div className="text-yellow-400 text-2xl font-bold">
-              {Math.ceil(levelTimeRemaining)}s
-            </div>
-            <div className="w-48 h-2 bg-gray-700 rounded-full overflow-hidden mt-1">
-              <div
-                className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all"
-                style={{ width: `${(levelTimeRemaining / levels[currentLevel - 1].targetTime) * 100}%` }}
-              />
-            </div>
-          </div>
-          
-          <canvas
-            ref={canvasRef}
-            width={CANVAS_WIDTH}
-            height={CANVAS_HEIGHT}
-            className="border-2 border-gray-600 rounded-lg shadow-2xl cursor-pointer"
-          />
-        </div>
-      )}
-
-      {currentScreen === 'PAUSED' && (
-        <div className="text-center">
-          <h2 className="text-4xl font-bold text-white mb-8">⏸ PAUSED</h2>
-          <button
-            onClick={togglePause}
-            className="px-8 py-3 bg-blue-600 text-white rounded-lg text-xl font-bold hover:bg-blue-700 mb-4 block mx-auto"
-          >
-            Resume
-          </button>
-          <button
-            onClick={goToMenu}
-            className="px-8 py-3 bg-gray-600 text-white rounded-lg text-xl font-bold hover:bg-gray-700 block mx-auto"
-          >
-            Main Menu
-          </button>
-        </div>
-      )}
-
-      {currentScreen === 'LEVEL_COMPLETE' && (
-        <div className="text-center">
-          <h2 className="text-5xl font-bold text-green-400 mb-4">✅ LEVEL COMPLETE!</h2>
-          <div className="text-6xl text-yellow-400 mb-4">
-            {'★'.repeat(levelStars)}{'☆'.repeat(3 - levelStars)}
-          </div>
-          <div className="text-white text-2xl mb-2">
-            Score: {stateRef.current.score}
-          </div>
-          <div className="text-gray-400 text-xl mb-8">
-            Best: {levelBestScores[currentLevel] || stateRef.current.score}
-          </div>
-          {currentLevel < 5 && (
-            <button
-              onClick={() => startLevel(currentLevel + 1)}
-              className="px-8 py-3 bg-green-600 text-white rounded-lg text-xl font-bold hover:bg-green-700 mb-4 block mx-auto"
-            >
-              Next Level
-            </button>
-          )}
-          <button
-            onClick={goToMenu}
-            className="px-8 py-3 bg-gray-600 text-white rounded-lg text-xl font-bold hover:bg-gray-700 block mx-auto"
-          >
-            Main Menu
-          </button>
-        </div>
-      )}
-
-      {currentScreen === 'GAME_OVER' && (
-        <div className="text-center">
-          <h2 className="text-5xl font-bold text-red-500 mb-4">💀 GAME OVER</h2>
-          <div className="text-white text-2xl mb-2">
-            Final Score: {stateRef.current.score}
-          </div>
-          <div className="text-gray-400 text-xl mb-2">
-            Best Score: {stateRef.current.highScore}
-          </div>
-          {stateRef.current.isNewRecord && (
-            <div className="text-yellow-400 text-2xl font-bold mb-4 animate-pulse">
-              🏆 NEW RECORD! 🏆
-            </div>
-          )}
-          <div className="text-gray-400 text-lg mb-8">
-            Max Size: {Math.round(stateRef.current.maxRadiusReached)}px
-          </div>
-          <button
-            onClick={handleRestart}
-            className="px-8 py-3 bg-blue-600 text-white rounded-lg text-xl font-bold hover:bg-blue-700 mb-4 block mx-auto"
-          >
-            Retry Level
-          </button>
-          <button
-            onClick={goToMenu}
-            className="px-8 py-3 bg-gray-600 text-white rounded-lg text-xl font-bold hover:bg-gray-700 block mx-auto"
-          >
-            Main Menu
-          </button>
-        </div>
-      )}
-
-      {currentScreen === 'PLAYING' && (
-        <div className="mt-4 flex flex-wrap gap-3 justify-center text-xs text-gray-500">
-          <span>🟥 Obstacles = Grow</span>
-          <span>🔴 Birds = Fly & Grow</span>
-          <span>🟢 Green = Shrink +5</span>
-          <span>🟡 Coins = +10</span>
-          <span>⭐ Gold = +25</span>
-          <span>🟣 Purple = Double Jump</span>
-          <span>🔵 Blue = Ice Shield (1 hit)</span>
-          <span>🟫 Platforms = Jump higher</span>
-        </div>
-      )}
+      <h1 className="text-3xl font-bold text-white mb-2">
+        🏃 Hero Runner
+      </h1>
+      <p className="text-gray-400 mb-4 text-sm">
+        <kbd className="px-2 py-1 bg-gray-700 rounded text-white text-xs font-mono">SPACE</kbd> / <span className="text-blue-400 font-semibold">Click</span> Jump
+        &nbsp;•&nbsp;
+        <kbd className="px-2 py-1 bg-gray-700 rounded text-white text-xs font-mono">P</kbd> / <kbd className="px-2 py-1 bg-gray-700 rounded text-white text-xs font-mono">ESC</kbd> Pause
+      </p>
+      <canvas
+        ref={canvasRef}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
+        className="border-2 border-gray-600 rounded-lg shadow-2xl cursor-pointer max-w-full"
+      />
+      <div className="mt-4 flex flex-wrap gap-3 justify-center text-xs text-gray-500">
+        <span>🟥 Obstacles = Grow</span>
+        <span>🔴 Birds = Fly & Grow</span>
+        <span>🟢 Green = Shrink +5</span>
+        <span>🟡 Coins = +10</span>
+        <span>⭐ Gold = +25</span>
+        <span>🟣 Purple = Double Jump</span>
+        <span>🔵 Blue = Ice Shield (1 hit)</span>
+        <span>🟫 Platforms = Jump higher</span>
+      </div>
     </div>
   );
 }
