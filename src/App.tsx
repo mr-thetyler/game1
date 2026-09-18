@@ -98,7 +98,7 @@ const BASE_SCROLL_SPEED = 3;
 const LINE_SPACING = 80;
 const MAX_RADIUS = 160; // Game Over when hero fills the screen (diameter = GROUND_Y)
 const HITBOX_SHRINK = 0.9;
-const INVINCIBILITY_DURATION = 30;
+const INVINCIBILITY_DURATION = 5; // Reduced from 30 to allow faster consecutive hits
 const HIT_ANIMATION_DURATION = 48;
 const SCREEN_SHAKE_DURATION = 12;
 const HIGH_SCORE_KEY = 'heroRunnerHighScore';
@@ -1485,7 +1485,7 @@ function App() {
     ctx.fillStyle = '#1f2937';
     ctx.font = 'bold 20px Arial';
     ctx.textAlign = 'right';
-    ctx.fillText(`Size: ${sizePercent}%`, CANVAS_WIDTH - 15, 12);
+    ctx.fillText(`Size: ${sizePercent}% (${state.heroRadius.toFixed(0)}px)`, CANVAS_WIDTH - 15, 12);
 
     const barX = 150;
     const barY = 12;
