@@ -649,7 +649,7 @@ function handleObstacleHit(state: GameState, obsX: number, obsY: number): void {
   }
 
   // FIX #2: Hero grows on hit
-  state.heroRadius *= 1.15;
+  state.heroRadius *= 1.25;
   if (state.heroRadius > state.maxRadiusReached) {
     state.maxRadiusReached = state.heroRadius;
   }
