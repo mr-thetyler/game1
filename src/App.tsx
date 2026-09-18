@@ -55,12 +55,13 @@ const ICE_SHIELD_SPAWN_MIN = 720; // 12 seconds
 const ICE_SHIELD_SPAWN_MAX = 1080; // 18 seconds
 
 // Flying obstacle constants
-const FLYING_OBSTACLE_SPAWN_MIN = 240; // 4 seconds
-const FLYING_OBSTACLE_SPAWN_MAX = 480; // 8 seconds
-const FLYING_OBSTACLE_FIRST_DELAY = 600; // 10 seconds before first spawn (increased from 2s)
-const FLYING_OBSTACLE_BASE_SPEED = 3; // Base horizontal speed in pixels per frame
-const FLYING_OBSTACLE_BASE_DOWN_SPEED = 2; // Base downward speed in pixels per frame
-const FLYING_OBSTACLE_SAFE_DISTANCE = 200; // Minimum distance from ground obstacles
+const FLYING_OBSTACLE_SPAWN_MIN = 300; // 5 seconds
+const FLYING_OBSTACLE_SPAWN_MAX = 600; // 10 seconds
+const FLYING_OBSTACLE_FIRST_DELAY = 600; // 10 seconds before first spawn
+const FLYING_OBSTACLE_BASE_SPEED = 4; // Base horizontal speed in pixels per frame
+const FLYING_OBSTACLE_VERTICAL_DRIFT_MIN = -1; // Min vertical drift
+const FLYING_OBSTACLE_VERTICAL_DRIFT_MAX = 1; // Max vertical drift
+const FLYING_OBSTACLE_SAFE_DISTANCE = 150; // Minimum distance from ground obstacles
 
 // ==================== TYPES ====================
 interface Obstacle {
@@ -335,7 +336,7 @@ function spawnObstacle(state: GameState): void {
   });
 }
 
-/** Spawn a flying obstacle (bird) from the top */
+/** Spawn a flying obstacle (bird) - horizontal movement with vertical drift */
 function spawnFlyingObstacle(state: GameState): void {
   // Only spawn after initial delay (10 seconds)
   if (state.survivalTime < FLYING_OBSTACLE_FIRST_DELAY) return;
@@ -343,39 +344,45 @@ function spawnFlyingObstacle(state: GameState): void {
   // Calculate current speed multiplier
   const speedMultiplier = state.scrollSpeed / state.baseSpeed;
 
-  // Determine spawn X position (off-screen right)
-  const spawnX = CANVAS_WIDTH + randomRange(50, 150);
+  // Spawn at fixed X position (off-screen right)
+  const spawnX = CANVAS_WIDTH + 50;
 
-  // BUG FIX 1: Check if there's a ground obstacle within safe distance
-  const hasNearbyObstacle = state.obstacles.some(obs => {
-    const obsCenterX = obs.x + obs.width / 2;
-    return Math.abs(obsCenterX - spawnX) < FLYING_OBSTACLE_SAFE_DISTANCE;
-  });
-
-  // If there's a nearby obstacle, don't spawn the bird (safe spawning)
-  if (hasNearbyObstacle) return;
-
-  // BUG FIX 2 & 3: Scale bird speed with speed multiplier
-  const velocityX = -(FLYING_OBSTACLE_BASE_SPEED * speedMultiplier);
-  
-  // Determine height tier with new variety: 60% medium, 30% high, 10% low
+  // Determine height tier: 60% medium, 25% high, 15% low
   const tier = Math.random();
   let startY: number;
-  let velocityY: number;
 
   if (tier < 0.6) {
-    // Medium flyer (60%) - starts at medium height, moderate descent
-    startY = -150;
-    velocityY = FLYING_OBSTACLE_BASE_DOWN_SPEED * speedMultiplier * 1.2;
-  } else if (tier < 0.9) {
-    // High flyer (30%) - starts very high, steep descent
-    startY = -250;
-    velocityY = FLYING_OBSTACLE_BASE_DOWN_SPEED * speedMultiplier * 1.8;
+    // Medium height (60%) - y between 100-200
+    startY = randomRange(100, 200);
+  } else if (tier < 0.85) {
+    // High height (25%) - y between 50-100
+    startY = randomRange(50, 100);
   } else {
-    // Low flyer (10%) - starts low, almost horizontal (hard to see!)
-    startY = -80;
-    velocityY = FLYING_OBSTACLE_BASE_DOWN_SPEED * speedMultiplier * 0.6;
+    // Low height (15%) - y between 200-250
+    startY = randomRange(200, 250);
   }
+
+  // Safe spawning: check if there's a ground obstacle within safe distance of bird's Y position
+  const hasNearbyObstacle = state.obstacles.some(obs => {
+    const obsTop = obs.y;
+    const obsBottom = obs.y + obs.height;
+    // Check if bird's Y position overlaps with obstacle's vertical range (with safe distance buffer)
+    return Math.abs(startY - obsTop) < FLYING_OBSTACLE_SAFE_DISTANCE ||
+           Math.abs(startY - obsBottom) < FLYING_OBSTACLE_SAFE_DISTANCE;
+  });
+
+  // If there's a nearby obstacle, don't spawn the bird
+  if (hasNearbyObstacle) return;
+
+  // Horizontal movement: right to left, scales with speed multiplier
+  const velocityX = -(FLYING_OBSTACLE_BASE_SPEED * speedMultiplier);
+  
+  // Vertical drift: slight up/down wobble, scales with speed multiplier
+  const verticalDrift = randomRange(
+    FLYING_OBSTACLE_VERTICAL_DRIFT_MIN * 100,
+    FLYING_OBSTACLE_VERTICAL_DRIFT_MAX * 100
+  ) / 100; // Random between -1 and 1
+  const velocityY = verticalDrift * speedMultiplier;
 
   const size = randomRange(20, 30);
 
@@ -773,8 +780,8 @@ function App() {
       bird.y += bird.velocityY;
       bird.wingPhase += 0.2;
 
-      // Remove if off-screen
-      if (bird.x < -50 || bird.y > CANVAS_HEIGHT + 50) {
+      // Remove if off-screen (left, too low, or too high)
+      if (bird.x < -50 || bird.y > CANVAS_HEIGHT || bird.y < -100) {
         state.flyingObstacles.splice(i, 1);
       }
     }
@@ -887,10 +894,10 @@ function App() {
     // Flying obstacle spawning - interval scales with speed
     state.flyingObstacleTimer++;
     const speedMultiplier = state.scrollSpeed / state.baseSpeed;
-    // Reduce spawn interval as speed increases: baseInterval / (1 + speedMultiplier * 0.1)
+    // Reduce spawn interval as speed increases: baseInterval / (1 + speedMultiplier * 0.15)
     const flyingIntervalAdjusted = Math.max(
       120, // Minimum 2 seconds between spawns
-      Math.floor(state.flyingObstacleInterval / (1 + speedMultiplier * 0.1))
+      Math.floor(state.flyingObstacleInterval / (1 + speedMultiplier * 0.15))
     );
     if (state.flyingObstacleTimer >= flyingIntervalAdjusted) {
       state.flyingObstacleTimer = 0;
@@ -1065,33 +1072,13 @@ function App() {
 
     // --- Flying Obstacles (Birds) ---
     for (const bird of state.flyingObstacles) {
-      // Draw shadow/warning indicator on ground
-      if (bird.y < GROUND_Y - 50) {
-        // Calculate where bird will land (project forward)
-        const framesToGround = (GROUND_Y - bird.y) / bird.velocityY;
-        const landingX = bird.x + bird.velocityX * framesToGround;
-        
-        // Only show shadow if landing position is on screen
-        if (landingX > 0 && landingX < CANVAS_WIDTH) {
-          ctx.save();
-          ctx.globalAlpha = 0.3;
-          ctx.fillStyle = '#dc2626';
-          ctx.beginPath();
-          ctx.ellipse(landingX, GROUND_Y - 5, bird.size * 0.8, bird.size * 0.3, 0, 0, Math.PI * 2);
-          ctx.fill();
-          
-          // Pulsing warning effect
-          const pulse = Math.sin(state.frameCount * 0.2) * 0.2 + 0.8;
-          ctx.globalAlpha = 0.2 * pulse;
-          ctx.beginPath();
-          ctx.ellipse(landingX, GROUND_Y - 5, bird.size * 1.2, bird.size * 0.5, 0, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
-        }
-      }
-
       ctx.save();
       ctx.translate(bird.x, bird.y);
+      
+      // Add rotation based on vertical drift
+      // Tilt up when drifting up (negative velocityY), tilt down when drifting down (positive velocityY)
+      const rotation = Math.atan2(bird.velocityY, Math.abs(bird.velocityX)) * 0.5;
+      ctx.rotate(rotation);
 
       // Bird body (red diamond/triangle)
       ctx.fillStyle = '#dc2626';
