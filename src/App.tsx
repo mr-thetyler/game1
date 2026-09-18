@@ -96,7 +96,7 @@ const GRAVITY = 0.6;
 const JUMP_FORCE = -13;
 const BASE_SCROLL_SPEED = 3;
 const LINE_SPACING = 80;
-const MAX_RADIUS = 160; // Game Over when hero fills the screen (diameter = GROUND_Y)
+const MAX_RADIUS = 120;
 const HITBOX_SHRINK = 0.9;
 const INVINCIBILITY_DURATION = 5; // Reduced from 30 to allow faster consecutive hits
 const HIT_ANIMATION_DURATION = 48;
@@ -649,7 +649,7 @@ function handleObstacleHit(state: GameState, obsX: number, obsY: number): void {
   }
 
   // FIX #2: Hero grows on hit
-  state.heroRadius *= 1.50;
+  state.heroRadius *= 1.32;
   if (state.heroRadius > state.maxRadiusReached) {
     state.maxRadiusReached = state.heroRadius;
   }
