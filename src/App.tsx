@@ -100,15 +100,14 @@ const ICE_SHIELD_DURATION = 600;
 const ICE_SHIELD_SPAWN_MIN = 720;
 const ICE_SHIELD_SPAWN_MAX = 1080;
 
-const FLYING_OBSTACLE_SPAWN_MIN = 360;
-const FLYING_OBSTACLE_SPAWN_MAX = 720;
-const FLYING_OBSTACLE_FIRST_DELAY = 900;
-const FLYING_OBSTACLE_BASE_SPEED = 5;
-const FLYING_OBSTACLE_SAFE_DISTANCE = 200;
-const FLYING_OBSTACLE_LANES = [80, 150, 220, 300];
+const FLYING_OBSTACLE_SPAWN_MIN = 300; // 5 seconds
+const FLYING_OBSTACLE_SPAWN_MAX = 600; // 10 seconds
+const FLYING_OBSTACLE_FIRST_DELAY = 600; // 10 seconds before first spawn
+const FLYING_OBSTACLE_BASE_SPEED = 4; // Base horizontal speed in pixels per frame
+const FLYING_OBSTACLE_SAFE_DISTANCE = 150; // Minimum distance from ground obstacles
 const FLYING_OBSTACLE_WIDTH = 30;
 const FLYING_OBSTACLE_HEIGHT = 20;
-const FLYING_OBSTACLE_HITBOX = 25;
+const FLYING_OBSTACLE_HITBOX = 20; // Smaller than visual for forgiving collision
 
 // ==================== TYPES ====================
 interface Obstacle {
@@ -124,6 +123,8 @@ interface FlyingObstacle {
   width: number;
   height: number;
   velocityX: number;
+  verticalDrift: number; // Slight up/down drift (-1 to +1)
+  rotation: number; // Visual tilt based on drift
   wingPhase: number;
 }
 
@@ -366,28 +367,44 @@ function spawnObstacle(state: GameState): void {
 }
 
 function spawnFlyingObstacle(state: GameState): void {
-  // Don't spawn birds in first 15 seconds
+  // Don't spawn birds in first 10 seconds
   if (state.survivalTime < FLYING_OBSTACLE_FIRST_DELAY) return;
 
   const speedMultiplier = state.scrollSpeed / state.baseSpeed;
   const spawnX = CANVAS_WIDTH + 50;
 
-  // Choose random lane from the 4 fixed heights
-  const laneIndex = Math.floor(Math.random() * FLYING_OBSTACLE_LANES.length);
-  const startY = FLYING_OBSTACLE_LANES[laneIndex];
+  // Determine spawn height based on distribution:
+  // 60% medium (100-200), 25% high (50-100), 15% low (200-250)
+  const tier = Math.random();
+  let startY: number;
+  
+  if (tier < 0.60) {
+    // Medium height (60%)
+    startY = randomRange(100, 200);
+  } else if (tier < 0.85) {
+    // High height (25%)
+    startY = randomRange(50, 100);
+  } else {
+    // Low height (15%)
+    startY = randomRange(200, 250);
+  }
 
-  // Safe spawning: don't spawn if there's a ground obstacle within 200px
+  // Safe spawning: check if there's a ground obstacle within 150px of bird's Y position
   const hasNearbyObstacle = state.obstacles.some(obs => {
-    const obsTop = obs.y;
-    const obsBottom = obs.y + obs.height;
-    return Math.abs(startY - obsTop) < FLYING_OBSTACLE_SAFE_DISTANCE ||
-           Math.abs(startY - obsBottom) < FLYING_OBSTACLE_SAFE_DISTANCE;
+    const obsCenterY = obs.y + obs.height / 2;
+    return Math.abs(startY - obsCenterY) < FLYING_OBSTACLE_SAFE_DISTANCE;
   });
 
   if (hasNearbyObstacle) return;
 
-  // Horizontal movement only - NO vertical drift
+  // Horizontal movement (right to left)
   const velocityX = -(FLYING_OBSTACLE_BASE_SPEED * speedMultiplier);
+  
+  // Slight vertical drift (-1 to +1 pixels per frame)
+  const verticalDrift = (Math.random() * 2 - 1); // Random between -1 and +1
+  
+  // Rotation based on drift (tilt up when drifting up, down when drifting down)
+  const rotation = verticalDrift * 0.15; // Small angle in radians
 
   state.flyingObstacles.push({
     x: spawnX,
@@ -395,6 +412,8 @@ function spawnFlyingObstacle(state: GameState): void {
     width: FLYING_OBSTACLE_WIDTH,
     height: FLYING_OBSTACLE_HEIGHT,
     velocityX,
+    verticalDrift: verticalDrift * speedMultiplier,
+    rotation,
     wingPhase: Math.random() * Math.PI * 2,
   });
 }
@@ -837,12 +856,14 @@ function App() {
 
     for (let i = state.flyingObstacles.length - 1; i >= 0; i--) {
       const bird = state.flyingObstacles[i];
-      // Horizontal movement only - NO vertical movement
+      // Horizontal movement (right to left)
       bird.x += bird.velocityX;
+      // Slight vertical drift
+      bird.y += bird.verticalDrift;
       bird.wingPhase += 0.2;
 
-      // Remove bird only when it goes off-screen to the left
-      if (bird.x < -50) {
+      // Remove bird when it goes off-screen
+      if (bird.x < -50 || bird.y > CANVAS_HEIGHT || bird.y < -100) {
         state.flyingObstacles.splice(i, 1);
       }
     }
@@ -1141,12 +1162,13 @@ function App() {
       ctx.strokeRect(obs.x, obs.y, obs.width, obs.height);
     }
 
-    // Flying Obstacles (Birds) - Perfectly horizontal flight
+    // Flying Obstacles (Birds) - Horizontal flight with slight vertical drift
     for (const bird of state.flyingObstacles) {
       ctx.save();
       ctx.translate(bird.x, bird.y);
       
-      // NO rotation - birds fly perfectly horizontal
+      // Apply rotation based on vertical drift
+      ctx.rotate(bird.rotation);
 
       // Draw bird body as red diamond/triangle pointing left
       ctx.fillStyle = '#dc2626';
