@@ -1,15 +1,17 @@
 import { useEffect, useRef, useCallback } from 'react';
 
 /**
- * Hero Runner - HTML5 Canvas Game (Enhanced Edition v3)
+ * Hero Runner - HTML5 Canvas Game (Enhanced Edition v4)
  * 
  * Features:
  * - Blue circle hero with gravity & jump (Space/Click)
  * - Red obstacles: hero grows +15%, screen shake, invincibility frames
+ * - Red flying obstacles (birds): fly diagonally down, same collision effect
  * - Green shrinkers: hero shrinks -20%, +5 score
  * - Yellow coins: +10 score with floating text
  * - GOLD coins (high-altitude): +25 score, need platforms to reach
  * - PURPLE double-jump power-up: 15s of mid-air second jump
+ * - BLUE ice shield power-up: 10s, blocks first obstacle hit
  * - PLATFORMS: brown wooden platforms hero can stand on, break after 1s
  * - Game Over when radius >= 120px
  * - Continuous difficulty scaling (speed +4% every 3s, capped at 3x)
@@ -47,6 +49,17 @@ const DOUBLE_JUMP_SPAWN_MAX = 1200; // 20 seconds
 const DOUBLE_JUMP_FIRST_DELAY = 1200; // Wait 20s before first spawn
 const DOUBLE_JUMP_FORCE = -11; // Slightly weaker than normal jump
 
+// Ice shield constants
+const ICE_SHIELD_DURATION = 600; // 10 seconds at 60fps
+const ICE_SHIELD_SPAWN_MIN = 720; // 12 seconds
+const ICE_SHIELD_SPAWN_MAX = 1080; // 18 seconds
+
+// Flying obstacle constants
+const FLYING_OBSTACLE_SPAWN_MIN = 240; // 4 seconds
+const FLYING_OBSTACLE_SPAWN_MAX = 480; // 8 seconds
+const FLYING_OBSTACLE_FIRST_DELAY = 120; // 2 seconds before first spawn
+const FLYING_OBSTACLE_SPEED_MULTIPLIER = 1.3; // 30% faster than ground obstacles
+
 // ==================== TYPES ====================
 interface Obstacle {
   x: number;
@@ -55,11 +68,20 @@ interface Obstacle {
   height: number;
 }
 
+interface FlyingObstacle {
+  x: number;
+  y: number;
+  size: number;
+  velocityX: number;
+  velocityY: number;
+  wingPhase: number; // For wing animation
+}
+
 interface Coin {
   x: number;
   y: number;
   radius: number;
-  type: 'normal' | 'high' | 'doubleJump';
+  type: 'normal' | 'high' | 'doubleJump' | 'iceShield';
   sparklePhase: number;
 }
 
@@ -74,9 +96,9 @@ interface Platform {
   y: number;
   width: number;
   height: number;
-  standTimer: number; // How long hero has been standing on it
+  standTimer: number;
   breaking: boolean;
-  crackLevel: number; // 0-3 crack visual intensity
+  crackLevel: number;
 }
 
 interface FloatingText {
@@ -114,14 +136,19 @@ interface GameState {
   isGrounded: boolean;
   heroRadius: number;
   maxRadiusReached: number;
-  onPlatform: Platform | null; // Platform hero is currently standing on
+  onPlatform: Platform | null;
 
   // Double jump
   doubleJumpActive: boolean;
   doubleJumpTimer: number;
-  hasDoubleJumped: boolean; // Used for current airtime
+  hasDoubleJumped: boolean;
   doubleJumpSpawnTimer: number;
-  doubleJumpReadyTimer: number; // Shows "DOUBLE JUMP READY" text
+  doubleJumpReadyTimer: number;
+
+  // Ice shield
+  iceShieldActive: boolean;
+  iceShieldTimer: number;
+  iceShieldSpawnTimer: number;
 
   // Scrolling
   scrollOffset: number;
@@ -130,6 +157,7 @@ interface GameState {
 
   // Entities
   obstacles: Obstacle[];
+  flyingObstacles: FlyingObstacle[];
   coins: Coin[];
   shrinkers: Shrinker[];
   platforms: Platform[];
@@ -145,6 +173,8 @@ interface GameState {
   // Timers
   obstacleTimer: number;
   obstacleInterval: number;
+  flyingObstacleTimer: number;
+  flyingObstacleInterval: number;
   coinTimer: number;
   coinInterval: number;
   shrinkerTimer: number;
@@ -152,7 +182,7 @@ interface GameState {
   platformTimer: number;
   platformInterval: number;
 
-  // Difficulty scaling - continuous
+  // Difficulty scaling
   speedTimer: number;
   spawnRateTimer: number;
   minObstacleInterval: number;
@@ -169,7 +199,7 @@ interface GameState {
   // Invincibility
   invincibilityTimer: number;
 
-  // Hit face animation (0.8s = 48 frames)
+  // Hit face animation
   hitAnimationTimer: number;
 
   // Survival timer
@@ -202,11 +232,16 @@ function createInitialState(): GameState {
     doubleJumpSpawnTimer: 0,
     doubleJumpReadyTimer: 0,
 
+    iceShieldActive: false,
+    iceShieldTimer: 0,
+    iceShieldSpawnTimer: 0,
+
     scrollOffset: 0,
     scrollSpeed: BASE_SCROLL_SPEED,
     baseSpeed: BASE_SCROLL_SPEED,
 
     obstacles: [],
+    flyingObstacles: [],
     coins: [],
     shrinkers: [],
     platforms: [],
@@ -219,7 +254,9 @@ function createInitialState(): GameState {
     isNewRecord: false,
 
     obstacleTimer: 0,
-    obstacleInterval: randomRange(90, 150),
+    obstacleInterval: randomRange(120, 180), // Increased from 90-150 for balance
+    flyingObstacleTimer: 0,
+    flyingObstacleInterval: randomRange(FLYING_OBSTACLE_SPAWN_MIN, FLYING_OBSTACLE_SPAWN_MAX),
     coinTimer: 0,
     coinInterval: randomRange(45, 90),
     shrinkerTimer: 0,
@@ -296,11 +333,48 @@ function spawnObstacle(state: GameState): void {
   });
 }
 
+/** Spawn a flying obstacle (bird) from the top */
+function spawnFlyingObstacle(state: GameState): void {
+  // Only spawn after initial delay
+  if (state.survivalTime < FLYING_OBSTACLE_FIRST_DELAY) return;
+
+  // Determine height tier: high, medium, or low
+  const tier = Math.random();
+  let startY: number;
+  let velocityY: number;
+
+  if (tier < 0.33) {
+    // High flyer - starts very high, flies down slowly
+    startY = randomRange(-100, -60);
+    velocityY = randomRange(1, 2);
+  } else if (tier < 0.66) {
+    // Medium flyer - starts medium height
+    startY = randomRange(-80, -40);
+    velocityY = randomRange(1.5, 2.5);
+  } else {
+    // Low flyer - starts lower, flies down faster
+    startY = randomRange(-60, -20);
+    velocityY = randomRange(2, 3);
+  }
+
+  const velocityX = -(state.scrollSpeed * FLYING_OBSTACLE_SPEED_MULTIPLIER);
+  const size = randomRange(20, 30);
+
+  state.flyingObstacles.push({
+    x: CANVAS_WIDTH + randomRange(50, 150),
+    y: startY,
+    size,
+    velocityX,
+    velocityY,
+    wingPhase: Math.random() * Math.PI * 2,
+  });
+}
+
 function spawnCoin(state: GameState): void {
-  // 20% chance of high-altitude coin (needs platforms)
+  // 20% chance of high-altitude coin
   const isHigh = Math.random() < 0.2;
   const y = isHigh
-    ? randomRange(40, GROUND_Y - 200) // High up, needs platform
+    ? randomRange(40, GROUND_Y - 200)
     : randomRange(GROUND_Y - 150, GROUND_Y - 20);
 
   state.coins.push({
@@ -317,19 +391,29 @@ function spawnShrinker(state: GameState): void {
   state.shrinkers.push({ x: CANVAS_WIDTH + 20, y, radius: 15 });
 }
 
-/** Spawn a platform at varying heights */
+/** Spawn ice shield power-up */
+function spawnIceShield(state: GameState): void {
+  // Don't spawn if already active
+  if (state.iceShieldActive) return;
+
+  const y = randomRange(GROUND_Y - 180, GROUND_Y - 80);
+  state.coins.push({
+    x: CANVAS_WIDTH + 20,
+    y,
+    radius: 16,
+    type: 'iceShield',
+    sparklePhase: 0,
+  });
+}
+
 function spawnPlatform(state: GameState): void {
-  // Different height tiers
   const tier = Math.random();
   let y: number;
   if (tier < 0.4) {
-    // Low platform (easy jump from ground)
     y = GROUND_Y - randomRange(60, 90);
   } else if (tier < 0.75) {
-    // Medium platform
     y = GROUND_Y - randomRange(110, 160);
   } else {
-    // High platform (needs platform hopping or perfect timing)
     y = GROUND_Y - randomRange(180, 230);
   }
 
@@ -347,11 +431,8 @@ function spawnPlatform(state: GameState): void {
   });
 }
 
-/** Spawn double jump power-up (purple coin) - only after 20s */
 function spawnDoubleJumpPowerUp(state: GameState): void {
-  // Only spawn if game has been running for at least 20 seconds
   if (state.survivalTime < DOUBLE_JUMP_FIRST_DELAY) return;
-  // Don't spawn if already active
   if (state.doubleJumpActive) return;
 
   const y = randomRange(GROUND_Y - 180, GROUND_Y - 80);
@@ -384,7 +465,23 @@ function addParticles(state: GameState, x: number, y: number, color: string, cou
   }
 }
 
-/** Add speed lines for subtle speed increase feedback */
+/** Add ice shard particles for shield break effect */
+function addIceShards(state: GameState, x: number, y: number): void {
+  for (let i = 0; i < 15; i++) {
+    const angle = (Math.PI * 2 / 15) * i + Math.random() * 0.3;
+    const speed = randomRange(3, 7);
+    state.particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 2,
+      radius: randomRange(3, 6),
+      color: i % 2 === 0 ? '#67e8f9' : '#a5f3fc',
+      alpha: 1.0,
+      life: randomRange(30, 50),
+    });
+  }
+}
+
 function addSpeedLine(state: GameState): void {
   state.speedLines.push({
     x: CANVAS_WIDTH + 10,
@@ -397,36 +494,67 @@ function addSpeedLine(state: GameState): void {
 
 // ==================== COLLISION DETECTION ====================
 
+/** Handle obstacle hit (ground or flying) */
+function handleObstacleHit(state: GameState, obsX: number, obsY: number): void {
+  // Check if ice shield is active
+  if (state.iceShieldActive) {
+    // Shield blocks the hit!
+    state.iceShieldActive = false;
+    state.iceShieldTimer = 0;
+    
+    // Visual effects
+    addIceShards(state, HERO_X, state.heroY);
+    addFloatingText(state, HERO_X, state.heroY - state.heroRadius - 20, 'Shield Broken!', '#06b6d4');
+    
+    // No growth, no ouch animation, no invincibility
+    return;
+  }
+
+  // Normal hit without shield
+  state.heroRadius *= 1.15;
+  if (state.heroRadius > state.maxRadiusReached) state.maxRadiusReached = state.heroRadius;
+
+  state.flashTimer = 15;
+  state.squishTimer = 12;
+  state.screenShakeTimer = SCREEN_SHAKE_DURATION;
+  state.invincibilityTimer = INVINCIBILITY_DURATION;
+  state.hitAnimationTimer = HIT_ANIMATION_DURATION;
+
+  addParticles(state, obsX, obsY, '#ff4444', 8);
+  addFloatingText(state, HERO_X, state.heroY - state.heroRadius - 15, 'Ouch!', '#ef4444');
+
+  if (state.heroRadius >= MAX_RADIUS) {
+    state.isGameOver = true;
+    if (state.score > state.highScore) {
+      state.highScore = state.score;
+      state.isNewRecord = true;
+      localStorage.setItem(HIGH_SCORE_KEY, state.score.toString());
+    }
+  }
+}
+
 function checkCollisions(state: GameState): void {
   const heroR = state.heroRadius * HITBOX_SHRINK;
 
-  // Obstacle collisions (only if not invincible)
+  // Ground obstacle collisions (only if not invincible)
   if (state.invincibilityTimer <= 0) {
     for (let i = state.obstacles.length - 1; i >= 0; i--) {
       const obs = state.obstacles[i];
       if (circleRectCollision(HERO_X, state.heroY, heroR, obs.x, obs.y, obs.width, obs.height)) {
-        state.heroRadius *= 1.15;
-        if (state.heroRadius > state.maxRadiusReached) state.maxRadiusReached = state.heroRadius;
-
-        state.flashTimer = 15;
-        state.squishTimer = 12;
-        state.screenShakeTimer = SCREEN_SHAKE_DURATION;
-        state.invincibilityTimer = INVINCIBILITY_DURATION;
-        state.hitAnimationTimer = HIT_ANIMATION_DURATION; // "Ouch!" face for 0.8s
-
-        addParticles(state, obs.x + obs.width / 2, obs.y + obs.height / 2, '#ff4444', 8);
-        // "Ouch!" floating text above hero
-        addFloatingText(state, HERO_X, state.heroY - state.heroRadius - 15, 'Ouch!', '#ef4444');
+        handleObstacleHit(state, obs.x + obs.width / 2, obs.y + obs.height / 2);
         state.obstacles.splice(i, 1);
+        break;
+      }
+    }
+  }
 
-        if (state.heroRadius >= MAX_RADIUS) {
-          state.isGameOver = true;
-          if (state.score > state.highScore) {
-            state.highScore = state.score;
-            state.isNewRecord = true;
-            localStorage.setItem(HIGH_SCORE_KEY, state.score.toString());
-          }
-        }
+  // Flying obstacle collisions (only if not invincible)
+  if (state.invincibilityTimer <= 0) {
+    for (let i = state.flyingObstacles.length - 1; i >= 0; i--) {
+      const bird = state.flyingObstacles[i];
+      if (circleCircleCollision(HERO_X, state.heroY, heroR, bird.x, bird.y, bird.size * HITBOX_SHRINK)) {
+        handleObstacleHit(state, bird.x, bird.y);
+        state.flyingObstacles.splice(i, 1);
         break;
       }
     }
@@ -437,20 +565,22 @@ function checkCollisions(state: GameState): void {
     const coin = state.coins[i];
     if (circleCircleCollision(HERO_X, state.heroY, heroR, coin.x, coin.y, coin.radius * HITBOX_SHRINK)) {
       if (coin.type === 'doubleJump') {
-        // Activate double jump power-up
         state.doubleJumpActive = true;
         state.doubleJumpTimer = DOUBLE_JUMP_DURATION;
         state.hasDoubleJumped = false;
-        state.doubleJumpReadyTimer = 120; // Show text for 2 seconds
+        state.doubleJumpReadyTimer = 120;
         addFloatingText(state, coin.x, coin.y - 20, '2x JUMP!', '#a855f7');
         addParticles(state, coin.x, coin.y, '#c084fc', 12);
+      } else if (coin.type === 'iceShield') {
+        state.iceShieldActive = true;
+        state.iceShieldTimer = ICE_SHIELD_DURATION;
+        addFloatingText(state, coin.x, coin.y - 20, 'SHIELD!', '#06b6d4');
+        addParticles(state, coin.x, coin.y, '#67e8f9', 10);
       } else if (coin.type === 'high') {
-        // High-altitude coin worth +25
         state.score += 25;
         addFloatingText(state, coin.x, coin.y - 20, '+25', '#fbbf24');
         addParticles(state, coin.x, coin.y, '#fcd34d', 10);
       } else {
-        // Normal coin worth +10
         state.score += 10;
         addFloatingText(state, coin.x, coin.y - 20, '+10', '#f59e0b');
         addParticles(state, coin.x, coin.y, '#fbbf24', 6);
@@ -475,29 +605,21 @@ function checkCollisions(state: GameState): void {
 
 // ==================== PLATFORM COLLISION ====================
 
-/**
- * Check if hero should land on a platform.
- * Only lands from above (hero falling, hero bottom near platform top).
- * Returns the platform if hero lands on it, null otherwise.
- */
 function checkPlatformLanding(state: GameState): Platform | null {
-  // Only land if falling
   if (state.velocityY <= 0) return null;
 
   const heroBottom = state.heroY + state.heroRadius;
-  const heroPrevBottom = heroBottom - state.velocityY; // Where hero was last frame
+  const heroPrevBottom = heroBottom - state.velocityY;
 
   for (const platform of state.platforms) {
-    if (platform.breaking && platform.crackLevel >= 3) continue; // Broken platform
+    if (platform.breaking && platform.crackLevel >= 3) continue;
 
-    // Check horizontal overlap
     const heroLeft = HERO_X - state.heroRadius * 0.6;
     const heroRight = HERO_X + state.heroRadius * 0.6;
     const platLeft = platform.x;
     const platRight = platform.x + platform.width;
 
     if (heroRight > platLeft && heroLeft < platRight) {
-      // Check if hero crossed the platform top this frame
       if (heroPrevBottom <= platform.y && heroBottom >= platform.y) {
         return platform;
       }
@@ -518,16 +640,13 @@ function App() {
     if (state.isGameOver || state.isPaused) return;
 
     if (state.isGrounded || state.onPlatform) {
-      // Normal jump from ground or platform
       state.velocityY = JUMP_FORCE;
       state.isGrounded = false;
       state.onPlatform = null;
-      state.hasDoubleJumped = false; // Reset double jump for this airtime
+      state.hasDoubleJumped = false;
     } else if (state.doubleJumpActive && !state.hasDoubleJumped) {
-      // Double jump in mid-air
       state.velocityY = DOUBLE_JUMP_FORCE;
       state.hasDoubleJumped = true;
-      // Purple particles for double jump
       addParticles(state, HERO_X, state.heroY, '#c084fc', 8);
     }
   }, []);
@@ -553,19 +672,16 @@ function App() {
     state.velocityY += GRAVITY;
     state.heroY += state.velocityY;
 
-    // Platform landing check (before ground check)
     const landedPlatform = checkPlatformLanding(state);
     if (landedPlatform) {
       state.heroY = landedPlatform.y - state.heroRadius;
       state.velocityY = 0;
-      state.isGrounded = false; // Not on ground, but on platform
+      state.isGrounded = false;
       state.onPlatform = landedPlatform;
-      state.hasDoubleJumped = false; // Can double jump off platform too
+      state.hasDoubleJumped = false;
     }
 
-    // If on a platform, track standing time
     if (state.onPlatform) {
-      // Verify hero is still on the platform (horizontal overlap)
       const heroLeft = HERO_X - state.heroRadius * 0.6;
       const heroRight = HERO_X + state.heroRadius * 0.6;
       const plat = state.onPlatform;
@@ -574,20 +690,17 @@ function App() {
 
       if (heroRight > platLeft && heroLeft < platRight) {
         plat.standTimer++;
-        // Update crack level
         if (plat.standTimer >= PLATFORM_BREAK_TIME) {
-          plat.crackLevel = 3; // Fully broken
+          plat.crackLevel = 3;
         } else if (plat.standTimer >= PLATFORM_CRACK_START) {
           plat.crackLevel = Math.floor((plat.standTimer - PLATFORM_CRACK_START) / ((PLATFORM_BREAK_TIME - PLATFORM_CRACK_START) / 3)) + 1;
           plat.breaking = true;
         }
       } else {
-        // Hero walked off platform
         state.onPlatform = null;
       }
     }
 
-    // Ground collision
     if (state.heroY >= GROUND_Y - state.heroRadius) {
       state.heroY = GROUND_Y - state.heroRadius;
       state.velocityY = 0;
@@ -596,7 +709,6 @@ function App() {
       state.hasDoubleJumped = false;
     }
 
-    // If hero fell below platform without landing, clear onPlatform
     if (state.onPlatform && state.velocityY > 0) {
       const heroBottom = state.heroY + state.heroRadius;
       if (heroBottom > state.onPlatform.y + 20) {
@@ -614,6 +726,14 @@ function App() {
     }
     if (state.doubleJumpReadyTimer > 0) state.doubleJumpReadyTimer--;
 
+    // --- Ice Shield Timer ---
+    if (state.iceShieldActive) {
+      state.iceShieldTimer--;
+      if (state.iceShieldTimer <= 0) {
+        state.iceShieldActive = false;
+      }
+    }
+
     // --- Background Scroll ---
     state.scrollOffset += state.scrollSpeed;
     if (state.scrollOffset >= LINE_SPACING) {
@@ -626,6 +746,19 @@ function App() {
       if (state.obstacles[i].x + state.obstacles[i].width < -50) state.obstacles.splice(i, 1);
     }
 
+    // Move flying obstacles
+    for (let i = state.flyingObstacles.length - 1; i >= 0; i--) {
+      const bird = state.flyingObstacles[i];
+      bird.x += bird.velocityX;
+      bird.y += bird.velocityY;
+      bird.wingPhase += 0.2;
+
+      // Remove if off-screen
+      if (bird.x < -50 || bird.y > CANVAS_HEIGHT + 50) {
+        state.flyingObstacles.splice(i, 1);
+      }
+    }
+
     for (let i = state.coins.length - 1; i >= 0; i--) {
       state.coins[i].x -= state.scrollSpeed;
       if (state.coins[i].x < -50) state.coins.splice(i, 1);
@@ -636,18 +769,14 @@ function App() {
       if (state.shrinkers[i].x < -50) state.shrinkers.splice(i, 1);
     }
 
-    // Move platforms
     for (let i = state.platforms.length - 1; i >= 0; i--) {
       const plat = state.platforms[i];
       plat.x -= state.scrollSpeed;
 
-      // Remove if off screen or fully broken
       if (plat.x + plat.width < -50 || plat.crackLevel >= 3) {
-        // If hero was on this platform, detach
         if (state.onPlatform === plat) {
           state.onPlatform = null;
         }
-        // Break particles
         if (plat.crackLevel >= 3) {
           addParticles(state, plat.x + plat.width / 2, plat.y, '#92400e', 6);
         }
@@ -682,7 +811,6 @@ function App() {
       if (sl.x + sl.length < 0 || sl.alpha <= 0) state.speedLines.splice(i, 1);
     }
 
-    // Spawn speed lines based on current speed (more lines = faster)
     if (state.frameCount % Math.max(2, Math.floor(10 - state.scrollSpeed)) === 0) {
       addSpeedLine(state);
     }
@@ -692,7 +820,6 @@ function App() {
     if (state.invincibilityTimer > 0) state.invincibilityTimer--;
     if (state.hitAnimationTimer > 0) state.hitAnimationTimer--;
 
-    // Screen shake
     if (state.screenShakeTimer > 0) {
       state.screenShakeTimer--;
       state.screenShakeX = (Math.random() - 0.5) * 5;
@@ -702,7 +829,6 @@ function App() {
       state.screenShakeY = 0;
     }
 
-    // Squish animation
     if (state.squishTimer > 0) {
       state.squishTimer--;
       const progress = state.squishTimer / 12;
@@ -713,20 +839,17 @@ function App() {
       state.squishScaleY = 1;
     }
 
-    // --- CONTINUOUS DIFFICULTY SCALING (BUG FIX) ---
-    // Speed increases EVERY 3 seconds, continuously, until cap
+    // --- CONTINUOUS DIFFICULTY SCALING ---
     state.speedTimer++;
-    if (state.speedTimer >= 180) { // 3 seconds
+    if (state.speedTimer >= 180) {
       state.speedTimer = 0;
       const maxSpeed = state.baseSpeed * SPEED_CAP_MULTIPLIER;
       if (state.scrollSpeed < maxSpeed) {
-        state.scrollSpeed *= 1.04; // +4%
+        state.scrollSpeed *= 1.04;
         if (state.scrollSpeed > maxSpeed) state.scrollSpeed = maxSpeed;
       }
-      // NO other condition stops this - it runs forever until cap
     }
 
-    // Obstacle spawn rate increase every 5 seconds
     state.spawnRateTimer++;
     if (state.spawnRateTimer >= 300) {
       state.spawnRateTimer = 0;
@@ -739,6 +862,15 @@ function App() {
       state.obstacleTimer = 0;
       spawnObstacle(state);
       state.obstacleInterval = randomRange(state.minObstacleInterval, state.minObstacleInterval + 60);
+    }
+
+    // Flying obstacle spawning
+    state.flyingObstacleTimer++;
+    const flyingIntervalAdjusted = Math.max(120, state.flyingObstacleInterval - Math.floor(state.scrollSpeed * 10));
+    if (state.flyingObstacleTimer >= flyingIntervalAdjusted) {
+      state.flyingObstacleTimer = 0;
+      spawnFlyingObstacle(state);
+      state.flyingObstacleInterval = randomRange(FLYING_OBSTACLE_SPAWN_MIN, FLYING_OBSTACLE_SPAWN_MAX);
     }
 
     state.coinTimer++;
@@ -760,7 +892,6 @@ function App() {
       );
     }
 
-    // Platform spawning - increases with speed
     state.platformTimer++;
     const platformIntervalAdjusted = Math.max(60, state.platformInterval - Math.floor(state.scrollSpeed * 5));
     if (state.platformTimer >= platformIntervalAdjusted) {
@@ -769,12 +900,19 @@ function App() {
       state.platformInterval = randomRange(90, 200);
     }
 
-    // Double jump power-up spawning
     state.doubleJumpSpawnTimer++;
     const djInterval = randomRange(DOUBLE_JUMP_SPAWN_MIN, DOUBLE_JUMP_SPAWN_MAX);
     if (state.doubleJumpSpawnTimer >= djInterval) {
       state.doubleJumpSpawnTimer = 0;
       spawnDoubleJumpPowerUp(state);
+    }
+
+    // Ice shield spawning
+    state.iceShieldSpawnTimer++;
+    const iceInterval = randomRange(ICE_SHIELD_SPAWN_MIN, ICE_SHIELD_SPAWN_MAX);
+    if (state.iceShieldSpawnTimer >= iceInterval) {
+      state.iceShieldSpawnTimer = 0;
+      spawnIceShield(state);
     }
 
     // --- Check Collisions ---
@@ -785,7 +923,6 @@ function App() {
   const draw = useCallback((ctx: CanvasRenderingContext2D, state: GameState) => {
     ctx.save();
 
-    // Apply screen shake
     if (state.screenShakeTimer > 0) {
       ctx.translate(state.screenShakeX, state.screenShakeY);
     }
@@ -806,7 +943,7 @@ function App() {
       ctx.stroke();
     }
 
-    // --- Speed Lines (subtle visual feedback for speed) ---
+    // --- Speed Lines ---
     for (const sl of state.speedLines) {
       ctx.globalAlpha = Math.max(0, sl.alpha);
       ctx.strokeStyle = 'rgba(100, 100, 100, 0.5)';
@@ -828,12 +965,10 @@ function App() {
     ctx.lineTo(CANVAS_WIDTH, GROUND_Y);
     ctx.stroke();
 
-    // --- Platforms (brown/wooden) ---
+    // --- Platforms ---
     for (const plat of state.platforms) {
-      // Skip fully broken
       if (plat.crackLevel >= 3) continue;
 
-      // Shake if breaking
       let drawX = plat.x;
       let drawY = plat.y;
       if (plat.breaking) {
@@ -841,11 +976,9 @@ function App() {
         drawY += (Math.random() - 0.5) * plat.crackLevel;
       }
 
-      // Platform body (wooden brown)
       ctx.fillStyle = '#92400e';
       ctx.fillRect(drawX, drawY, plat.width, plat.height);
 
-      // Wood grain lines
       ctx.strokeStyle = '#78350f';
       ctx.lineWidth = 1;
       for (let g = 0; g < 3; g++) {
@@ -856,20 +989,16 @@ function App() {
         ctx.stroke();
       }
 
-      // Platform border
       ctx.strokeStyle = '#451a03';
       ctx.lineWidth = 2;
       ctx.strokeRect(drawX, drawY, plat.width, plat.height);
 
-      // Top highlight
       ctx.fillStyle = '#b45309';
       ctx.fillRect(drawX, drawY, plat.width, 3);
 
-      // Crack lines (when breaking)
       if (plat.crackLevel >= 1) {
         ctx.strokeStyle = '#1c1917';
         ctx.lineWidth = 1.5;
-        // Crack 1
         ctx.beginPath();
         ctx.moveTo(drawX + plat.width * 0.3, drawY);
         ctx.lineTo(drawX + plat.width * 0.35, drawY + plat.height * 0.5);
@@ -877,7 +1006,6 @@ function App() {
         ctx.stroke();
       }
       if (plat.crackLevel >= 2) {
-        // Crack 2
         ctx.beginPath();
         ctx.moveTo(drawX + plat.width * 0.7, drawY);
         ctx.lineTo(drawX + plat.width * 0.65, drawY + plat.height * 0.6);
@@ -885,7 +1013,6 @@ function App() {
         ctx.stroke();
       }
       if (plat.crackLevel >= 3) {
-        // Crack 3 - X pattern
         ctx.beginPath();
         ctx.moveTo(drawX + plat.width * 0.45, drawY + 2);
         ctx.lineTo(drawX + plat.width * 0.55, drawY + plat.height - 2);
@@ -895,11 +1022,10 @@ function App() {
       }
     }
 
-    // --- Obstacles ---
+    // --- Ground Obstacles ---
     for (const obs of state.obstacles) {
       ctx.fillStyle = '#dc2626';
       ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
-      // Spike top
       ctx.fillStyle = '#ef4444';
       ctx.beginPath();
       ctx.moveTo(obs.x, obs.y);
@@ -912,17 +1038,57 @@ function App() {
       ctx.strokeRect(obs.x, obs.y, obs.width, obs.height);
     }
 
+    // --- Flying Obstacles (Birds) ---
+    for (const bird of state.flyingObstacles) {
+      ctx.save();
+      ctx.translate(bird.x, bird.y);
+
+      // Bird body (red diamond/triangle)
+      ctx.fillStyle = '#dc2626';
+      ctx.beginPath();
+      ctx.moveTo(0, -bird.size * 0.5);
+      ctx.lineTo(bird.size * 0.4, 0);
+      ctx.lineTo(0, bird.size * 0.5);
+      ctx.lineTo(-bird.size * 0.4, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#991b1b';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Wings (animated)
+      const wingOffset = Math.sin(bird.wingPhase) * bird.size * 0.3;
+      ctx.fillStyle = '#ef4444';
+      
+      // Left wing
+      ctx.beginPath();
+      ctx.moveTo(-bird.size * 0.3, 0);
+      ctx.lineTo(-bird.size * 0.8, -wingOffset);
+      ctx.lineTo(-bird.size * 0.3, bird.size * 0.2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Right wing
+      ctx.beginPath();
+      ctx.moveTo(bird.size * 0.3, 0);
+      ctx.lineTo(bird.size * 0.8, -wingOffset);
+      ctx.lineTo(bird.size * 0.3, bird.size * 0.2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
     // --- Coins ---
     for (const coin of state.coins) {
       if (coin.type === 'doubleJump') {
-        // Purple double-jump power-up coin
         const pulse = Math.sin(state.frameCount * 0.15) * 3 + 3;
-        // Glow
         ctx.beginPath();
         ctx.arc(coin.x, coin.y, coin.radius + pulse + 4, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(168, 85, 247, 0.2)';
         ctx.fill();
-        // Body
         ctx.beginPath();
         ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
         ctx.fillStyle = '#a855f7';
@@ -930,13 +1096,11 @@ function App() {
         ctx.strokeStyle = '#7c3aed';
         ctx.lineWidth = 2;
         ctx.stroke();
-        // "2x" text
         ctx.fillStyle = '#fff';
         ctx.font = 'bold 11px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('2x', coin.x, coin.y);
-        // Sparkle
         const sparkleAngle = state.frameCount * 0.05;
         for (let s = 0; s < 4; s++) {
           const sa = sparkleAngle + (Math.PI / 2) * s;
@@ -947,15 +1111,53 @@ function App() {
           ctx.arc(sx, sy, 2, 0, Math.PI * 2);
           ctx.fill();
         }
+      } else if (coin.type === 'iceShield') {
+        // Ice shield coin (cyan/blue)
+        const pulse = Math.sin(state.frameCount * 0.12) * 3 + 3;
+        // Outer glow
+        ctx.beginPath();
+        ctx.arc(coin.x, coin.y, coin.radius + pulse + 5, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(103, 232, 249, 0.25)';
+        ctx.fill();
+        // Main body
+        ctx.beginPath();
+        ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
+        ctx.fillStyle = '#06b6d4';
+        ctx.fill();
+        ctx.strokeStyle = '#0891b2';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // Shield icon (hexagon)
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const angle = (Math.PI / 3) * i - Math.PI / 2;
+          const hx = coin.x + Math.cos(angle) * coin.radius * 0.5;
+          const hy = coin.y + Math.sin(angle) * coin.radius * 0.5;
+          if (i === 0) ctx.moveTo(hx, hy);
+          else ctx.lineTo(hx, hy);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        // Sparkle
+        const sparkleAngle = state.frameCount * 0.06;
+        for (let s = 0; s < 3; s++) {
+          const sa = sparkleAngle + (Math.PI * 2 / 3) * s;
+          const sr = coin.radius + 8;
+          const sx = coin.x + Math.cos(sa) * sr;
+          const sy = coin.y + Math.sin(sa) * sr;
+          ctx.fillStyle = 'rgba(165, 243, 252, 0.9)';
+          ctx.beginPath();
+          ctx.arc(sx, sy, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
       } else if (coin.type === 'high') {
-        // High-altitude gold coin with sparkle
         const sparkle = Math.sin(state.frameCount * 0.12 + coin.sparklePhase) * 0.3 + 0.7;
-        // Outer sparkle ring
         ctx.beginPath();
         ctx.arc(coin.x, coin.y, coin.radius + 5, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(252, 211, 77, ${sparkle * 0.3})`;
         ctx.fill();
-        // Body
         ctx.beginPath();
         ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
         ctx.fillStyle = '#fbbf24';
@@ -963,13 +1165,11 @@ function App() {
         ctx.strokeStyle = '#d97706';
         ctx.lineWidth = 2.5;
         ctx.stroke();
-        // Star/diamond shape inside
         ctx.fillStyle = '#92400e';
         ctx.font = 'bold 13px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('★', coin.x, coin.y + 1);
-        // Sparkle particles
         for (let s = 0; s < 3; s++) {
           const sa = state.frameCount * 0.08 + (Math.PI * 2 / 3) * s;
           const sr = coin.radius + 8 + Math.sin(state.frameCount * 0.1 + s) * 3;
@@ -983,7 +1183,6 @@ function App() {
         }
         ctx.globalAlpha = 1;
       } else {
-        // Normal yellow coin
         ctx.beginPath();
         ctx.arc(coin.x, coin.y, coin.radius + 3, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(251, 191, 36, 0.3)';
@@ -1039,17 +1238,27 @@ function App() {
     ctx.translate(HERO_X, state.heroY);
     ctx.scale(state.squishScaleX, state.squishScaleY);
 
-    // Double jump purple aura
+    // Ice shield aura (cyan inner glow)
+    if (state.iceShieldActive) {
+      const shieldPulse = Math.sin(state.frameCount * 0.12) * 4 + 8;
+      const shieldAlpha = 0.25 + Math.sin(state.frameCount * 0.1) * 0.1;
+      ctx.beginPath();
+      ctx.arc(0, 0, state.heroRadius + shieldPulse, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(103, 232, 249, ${shieldAlpha})`;
+      ctx.fill();
+      ctx.strokeStyle = `rgba(6, 182, 212, ${shieldAlpha * 1.5})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // Double jump purple aura (outer ring)
     if (state.doubleJumpActive) {
       const auraPulse = Math.sin(state.frameCount * 0.1) * 5 + 10;
       const auraAlpha = 0.2 + Math.sin(state.frameCount * 0.08) * 0.1;
       ctx.beginPath();
-      ctx.arc(0, 0, state.heroRadius + auraPulse, 0, Math.PI * 2);
+      ctx.arc(0, 0, state.heroRadius + auraPulse + (state.iceShieldActive ? 12 : 0), 0, Math.PI * 2);
       ctx.fillStyle = `rgba(168, 85, 247, ${auraAlpha})`;
       ctx.fill();
-      // Second aura ring
-      ctx.beginPath();
-      ctx.arc(0, 0, state.heroRadius + auraPulse + 5, 0, Math.PI * 2);
       ctx.strokeStyle = `rgba(196, 181, 253, ${auraAlpha * 0.5})`;
       ctx.lineWidth = 2;
       ctx.stroke();
@@ -1059,7 +1268,6 @@ function App() {
     const isInvincibleVisible = state.invincibilityTimer <= 0 || Math.floor(state.invincibilityTimer / 3) % 2 === 0;
 
     if (isInvincibleVisible) {
-      // Red flash on hit
       if (state.flashTimer > 0) {
         const flashAlpha = state.flashTimer / 15;
         ctx.beginPath();
@@ -1068,10 +1276,8 @@ function App() {
         ctx.fill();
       }
 
-      // Hero body - red/orange during hit animation, otherwise blue
       let heroColor: string;
       if (state.hitAnimationTimer > 0) {
-        // Transition from red to orange during hit animation
         const hitProgress = state.hitAnimationTimer / HIT_ANIMATION_DURATION;
         const r = 239;
         const g = Math.floor(68 + (1 - hitProgress) * 80);
@@ -1091,7 +1297,6 @@ function App() {
       ctx.lineWidth = 3;
       ctx.stroke();
 
-      // Highlight (skip during hit animation for more "hurt" look)
       if (state.hitAnimationTimer <= 0) {
         ctx.beginPath();
         ctx.arc(-state.heroRadius * 0.25, -state.heroRadius * 0.25, state.heroRadius * 0.35, 0, Math.PI * 2);
@@ -1099,63 +1304,51 @@ function App() {
         ctx.fill();
       }
 
-      // --- FACE DRAWING ---
       if (state.hitAnimationTimer > 0) {
-        // "OUCH" FACE: Two squeezed eyes (> <) and open "O" mouth
         const r = state.heroRadius;
         const eyeY = -r * 0.15;
         const eyeSize = r * 0.2;
 
-        // Left squeezed eye: ">" shape (downward-curving arc)
         ctx.strokeStyle = '#1a1a1a';
         ctx.lineWidth = Math.max(2, r * 0.08);
         ctx.lineCap = 'round';
-        // Left eye ">" - two lines forming a V pointing right
         ctx.beginPath();
         ctx.moveTo(-r * 0.35 - eyeSize, eyeY - eyeSize * 0.7);
         ctx.lineTo(-r * 0.35, eyeY);
         ctx.lineTo(-r * 0.35 - eyeSize, eyeY + eyeSize * 0.7);
         ctx.stroke();
 
-        // Right eye "<" - two lines forming a V pointing left
         ctx.beginPath();
         ctx.moveTo(r * 0.35 + eyeSize, eyeY - eyeSize * 0.7);
         ctx.lineTo(r * 0.35, eyeY);
         ctx.lineTo(r * 0.35 + eyeSize, eyeY + eyeSize * 0.7);
         ctx.stroke();
 
-        // Open "O" mouth - oval shape showing shock/pain
         const mouthY = r * 0.25;
         const mouthW = r * 0.2;
         const mouthH = r * 0.25;
-        // Mouth wobble based on animation progress
         const wobble = Math.sin(state.hitAnimationTimer * 0.5) * r * 0.03;
         ctx.beginPath();
         ctx.ellipse(wobble, mouthY, mouthW, mouthH, 0, 0, Math.PI * 2);
         ctx.fillStyle = '#1a1a1a';
         ctx.fill();
-        // Inner mouth (tongue/throat)
         ctx.beginPath();
         ctx.ellipse(wobble, mouthY + mouthH * 0.2, mouthW * 0.5, mouthH * 0.4, 0, 0, Math.PI * 2);
         ctx.fillStyle = '#991b1b';
         ctx.fill();
 
-        ctx.lineCap = 'butt'; // Reset line cap
+        ctx.lineCap = 'butt';
       } else {
-        // NORMAL FACE: One big white eye with black pupil + small smile
         const eyeOffset = state.heroRadius * 0.3;
-        // Eye white
         ctx.beginPath();
         ctx.arc(eyeOffset, -eyeOffset * 0.5, state.heroRadius * 0.2, 0, Math.PI * 2);
         ctx.fillStyle = '#fff';
         ctx.fill();
-        // Pupil
         ctx.beginPath();
         ctx.arc(eyeOffset + 2, -eyeOffset * 0.5, state.heroRadius * 0.1, 0, Math.PI * 2);
         ctx.fillStyle = '#1a1a1a';
         ctx.fill();
 
-        // Small smile (neutral/happy mouth)
         ctx.strokeStyle = '#1a1a1a';
         ctx.lineWidth = Math.max(1.5, state.heroRadius * 0.06);
         ctx.lineCap = 'round';
@@ -1226,6 +1419,15 @@ function App() {
       ctx.fillText(`2x JUMP: ${djSecondsLeft}s`, CANVAS_WIDTH / 2, 68);
     }
 
+    // Ice shield timer indicator
+    if (state.iceShieldActive) {
+      const shieldSecondsLeft = Math.ceil(state.iceShieldTimer / 60);
+      ctx.fillStyle = '#06b6d4';
+      ctx.font = 'bold 14px Arial';
+      ctx.textAlign = 'left';
+      ctx.fillText(`🛡️ SHIELD: ${shieldSecondsLeft}s`, 15, 54);
+    }
+
     // --- UI: Size percentage ---
     const sizePercent = Math.round((state.heroRadius / MAX_RADIUS) * 100);
     ctx.fillStyle = '#1f2937';
@@ -1261,7 +1463,7 @@ function App() {
     ctx.textBaseline = 'middle';
     ctx.fillText('DANGER', barX + barWidth / 2, barY + barHeight / 2);
 
-    ctx.restore(); // End screen shake transform
+    ctx.restore();
 
     // --- PAUSE OVERLAY ---
     if (state.isPaused) {
@@ -1416,11 +1618,13 @@ function App() {
       />
       <div className="mt-4 flex flex-wrap gap-3 justify-center text-xs text-gray-500">
         <span>🟥 Obstacles = Grow</span>
+        <span>🔴 Birds = Fly & Grow</span>
         <span>🟢 Green = Shrink +5</span>
         <span>🟡 Coins = +10</span>
-        <span>⭐ Gold = +25 (use platforms!)</span>
+        <span>⭐ Gold = +25</span>
         <span>🟣 Purple = Double Jump</span>
-        <span>🟫 Platforms = Jump higher (break after 1s)</span>
+        <span>🔵 Blue = Ice Shield (1 hit)</span>
+        <span>🟫 Platforms = Jump higher</span>
       </div>
     </div>
   );
