@@ -1,67 +1,44 @@
 import { useEffect, useRef, useCallback } from 'react';
 
 /**
- * Hero Runner - HTML5 Canvas Game (Enhanced Edition v4)
+ * Hero Runner - HTML5 Canvas Game
  * 
  * Features:
- * - Blue circle hero with gravity & jump (Space/Click)
- * - Red obstacles: hero grows +15%, screen shake, invincibility frames
- * - Red flying obstacles (birds): fly horizontally with slight vertical drift
- * - Green shrinkers: hero shrinks -20%, +5 score
- * - Yellow coins: +10 score with floating text
- * - GOLD coins (high-altitude): +25 score, need platforms to reach
- * - PURPLE double-jump power-up: 15s of mid-air second jump
- * - BLUE ice shield power-up: 10s, blocks first obstacle hit
- * - PLATFORMS: brown wooden platforms hero can stand on, break after 1s
- * - Game Over when radius >= 120px
- * - Continuous difficulty scaling (speed +4% every 3s, capped at 3x)
- * - Pause system (P/Esc)
- * - Local high score (localStorage)
- * - Survival timer, screen shake, invincibility frames, hit face animation
+ * - Player character with jump and slide mechanics
+ * - Ground obstacles with spikes
+ * - Flying birds with horizontal movement and vertical drift
+ * - Platforms to jump on
+ * - Coins for points
+ * - Ice shields for temporary invincibility
+ * - Shrinkers to reduce player size
+ * - Score tracking with localStorage high score
+ * - Start screen and game over screen
  */
 
-// ==================== CONSTANTS ====================
-const CANVAS_WIDTH = 800;
-const CANVAS_HEIGHT = 400;
-const GROUND_Y = CANVAS_HEIGHT - 50;
-const INITIAL_RADIUS = 30;
-const HERO_X = 100;
-const GRAVITY = 0.6;
-const JUMP_FORCE = -13;
-const BASE_SCROLL_SPEED = 3;
-const LINE_SPACING = 80;
-const MAX_RADIUS = 120;
-const HITBOX_SHRINK = 0.9;
-const SPEED_CAP_MULTIPLIER = 3;
-const INVINCIBILITY_DURATION = 30;
-const HIT_ANIMATION_DURATION = 48;
-const SCREEN_SHAKE_DURATION = 12;
-const HIGH_SCORE_KEY = 'heroRunnerHighScore';
-
-const PLATFORM_BREAK_TIME = 60;
-const PLATFORM_CRACK_START = 36;
-
-const DOUBLE_JUMP_DURATION = 900;
-const DOUBLE_JUMP_SPAWN_MIN = 900;
-const DOUBLE_JUMP_SPAWN_MAX = 1200;
-const DOUBLE_JUMP_FIRST_DELAY = 1200;
-const DOUBLE_JUMP_FORCE = -11;
-
-const ICE_SHIELD_DURATION = 600;
-const ICE_SHIELD_SPAWN_MIN = 720;
-const ICE_SHIELD_SPAWN_MAX = 1080;
-
-const FLYING_OBSTACLE_SPAWN_MIN = 300;
-const FLYING_OBSTACLE_SPAWN_MAX = 600;
-const FLYING_OBSTACLE_FIRST_DELAY = 600;
-const FLYING_OBSTACLE_BASE_SPEED = 4;
-const FLYING_OBSTACLE_SAFE_DISTANCE = 150;
-const FLYING_OBSTACLE_WIDTH = 30;
-const FLYING_OBSTACLE_HEIGHT = 20;
-const FLYING_OBSTACLE_HITBOX = 20;
-
 // ==================== TYPES ====================
-interface Obstacle {
+interface Player {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  velocityY: number;
+  isJumping: boolean;
+  isSliding: boolean;
+  isInvincible: boolean;
+  invincibilityTime: number;
+  faceDirection: number;
+  shrinkFactor: number;
+  blinkTimer: number;
+}
+
+interface Platform {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface GroundObstacle {
   x: number;
   y: number;
   width: number;
@@ -73,1488 +50,868 @@ interface FlyingObstacle {
   y: number;
   width: number;
   height: number;
-  velocityX: number;
   verticalDrift: number;
   rotation: number;
-  wingPhase: number;
 }
 
 interface Coin {
   x: number;
   y: number;
-  radius: number;
-  type: 'normal' | 'high' | 'doubleJump' | 'iceShield';
-  sparklePhase: number;
+  width: number;
+  height: number;
+}
+
+interface IceShield {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 interface Shrinker {
   x: number;
   y: number;
-  radius: number;
-}
-
-interface Platform {
-  x: number;
-  y: number;
   width: number;
   height: number;
-  standTimer: number;
-  breaking: boolean;
-  crackLevel: number;
-}
-
-interface FloatingText {
-  x: number;
-  y: number;
-  text: string;
-  color: string;
-  alpha: number;
-  velocityY: number;
-}
-
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  radius: number;
-  color: string;
-  alpha: number;
-  life: number;
-}
-
-interface SpeedLine {
-  x: number;
-  y: number;
-  length: number;
-  speed: number;
-  alpha: number;
 }
 
 interface GameState {
-  heroY: number;
-  velocityY: number;
-  isGrounded: boolean;
-  heroRadius: number;
-  maxRadiusReached: number;
-  onPlatform: Platform | null;
-
-  doubleJumpActive: boolean;
-  doubleJumpTimer: number;
-  hasDoubleJumped: boolean;
-  doubleJumpSpawnTimer: number;
-  doubleJumpReadyTimer: number;
-
-  iceShieldActive: boolean;
-  iceShieldTimer: number;
-  iceShieldSpawnTimer: number;
-
-  scrollOffset: number;
-  scrollSpeed: number;
-  baseSpeed: number;
-
-  obstacles: Obstacle[];
-  flyingObstacles: FlyingObstacle[];
-  coins: Coin[];
-  shrinkers: Shrinker[];
-  platforms: Platform[];
-  floatingTexts: FloatingText[];
-  particles: Particle[];
-  speedLines: SpeedLine[];
-
   score: number;
   highScore: number;
-  isNewRecord: boolean;
-
-  obstacleTimer: number;
-  obstacleInterval: number;
-  flyingObstacleTimer: number;
-  flyingObstacleInterval: number;
-  coinTimer: number;
-  coinInterval: number;
-  shrinkerTimer: number;
-  shrinkerInterval: number;
-  platformTimer: number;
-  platformInterval: number;
-
-  speedTimer: number;
-  spawnRateTimer: number;
-  minObstacleInterval: number;
-
-  flashTimer: number;
-  squishTimer: number;
-  squishScaleX: number;
-  squishScaleY: number;
-  screenShakeTimer: number;
-  screenShakeX: number;
-  screenShakeY: number;
-
-  invincibilityTimer: number;
-  hitAnimationTimer: number;
-
-  survivalTime: number;
-
-  isPaused: boolean;
-  isGameOver: boolean;
-  frameCount: number;
+  gameRunning: boolean;
+  gameStarted: boolean;
 }
 
-// ==================== HELPER FUNCTIONS ====================
+// ==================== CONSTANTS ====================
+const CANVAS_WIDTH = 800;
+const CANVAS_HEIGHT = 400;
+const GRAVITY = 0.8;
+const JUMP_FORCE = -15;
+const GROUND_Y = 350;
+const PLAYER_RUN_SPEED = 5;
 
-function createInitialState(): GameState {
-  const highScore = parseInt(localStorage.getItem(HIGH_SCORE_KEY) || '0', 10);
+const OBSTACLE_SPAWN_INTERVAL = 100;
+const COIN_SPAWN_INTERVAL = 200;
+const PLATFORM_SPAWN_INTERVAL = 300;
+const FLYING_OBSTACLE_BASE_SPEED = 4;
+const FLYING_OBSTACLE_VERTICAL_DRIFT = [-1, -0.5, 0, 0.5, 1];
+const FLYING_OBSTACLE_HITBOX = 20;
+const FLYING_OBSTACLE_SPAWN_MIN = 300;
+const FLYING_OBSTACLE_SPAWN_MAX = 600;
+const FLYING_OBSTACLE_SAFE_DISTANCE = 150;
 
-  return {
-    heroY: GROUND_Y - INITIAL_RADIUS,
-    velocityY: 0,
-    isGrounded: true,
-    heroRadius: INITIAL_RADIUS,
-    maxRadiusReached: INITIAL_RADIUS,
-    onPlatform: null,
+const HIGH_SCORE_KEY = 'heroRunnerHighScore';
 
-    doubleJumpActive: false,
-    doubleJumpTimer: 0,
-    hasDoubleJumped: false,
-    doubleJumpSpawnTimer: 0,
-    doubleJumpReadyTimer: 0,
-
-    iceShieldActive: false,
-    iceShieldTimer: 0,
-    iceShieldSpawnTimer: 0,
-
-    scrollOffset: 0,
-    scrollSpeed: BASE_SCROLL_SPEED,
-    baseSpeed: BASE_SCROLL_SPEED,
-
-    obstacles: [],
-    flyingObstacles: [],
-    coins: [],
-    shrinkers: [],
-    platforms: [],
-    floatingTexts: [],
-    particles: [],
-    speedLines: [],
-
-    score: 0,
-    highScore: highScore,
-    isNewRecord: false,
-
-    obstacleTimer: 0,
-    obstacleInterval: randomRange(120, 180),
-    flyingObstacleTimer: 0,
-    flyingObstacleInterval: randomRange(FLYING_OBSTACLE_SPAWN_MIN, FLYING_OBSTACLE_SPAWN_MAX),
-    coinTimer: 0,
-    coinInterval: randomRange(45, 90),
-    shrinkerTimer: 0,
-    shrinkerInterval: randomRange(480, 720),
-    platformTimer: 0,
-    platformInterval: randomRange(120, 240),
-
-    speedTimer: 0,
-    spawnRateTimer: 0,
-    minObstacleInterval: 90,
-
-    flashTimer: 0,
-    squishTimer: 0,
-    squishScaleX: 1,
-    squishScaleY: 1,
-    screenShakeTimer: 0,
-    screenShakeX: 0,
-    screenShakeY: 0,
-
-    invincibilityTimer: 0,
-    hitAnimationTimer: 0,
-
-    survivalTime: 0,
-
-    isPaused: false,
-    isGameOver: false,
-    frameCount: 0,
-  };
-}
-
-function randomRange(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-function circleRectCollision(
-  cx: number, cy: number, cr: number,
-  rx: number, ry: number, rw: number, rh: number
-): boolean {
-  const closestX = Math.max(rx, Math.min(cx, rx + rw));
-  const closestY = Math.max(ry, Math.min(cy, ry + rh));
-  const dx = cx - closestX;
-  const dy = cy - closestY;
-  return (dx * dx + dy * dy) < (cr * cr);
-}
-
-function circleCircleCollision(
-  x1: number, y1: number, r1: number,
-  x2: number, y2: number, r2: number
-): boolean {
-  const dx = x1 - x2;
-  const dy = y1 - y2;
-  return Math.sqrt(dx * dx + dy * dy) < (r1 + r2);
-}
-
-function formatTime(frames: number): string {
-  const totalSeconds = Math.floor(frames / 60);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-}
-
-// ==================== SPAWN FUNCTIONS ====================
-
-function spawnObstacle(state: GameState): void {
-  const isTall = Math.random() > 0.5;
-  const height = isTall ? randomRange(60, 100) : randomRange(30, 50);
-  const width = randomRange(25, 40);
-
-  state.obstacles.push({
-    x: CANVAS_WIDTH + 20,
-    y: GROUND_Y - height,
-    width,
-    height,
-  });
-}
-
-function spawnFlyingObstacle(state: GameState): void {
-  if (state.survivalTime < FLYING_OBSTACLE_FIRST_DELAY) return;
-
-  const speedMultiplier = state.scrollSpeed / state.baseSpeed;
-  const spawnX = CANVAS_WIDTH + 50;
-
-  const tier = Math.random();
-  let startY: number;
-  
-  if (tier < 0.60) {
-    startY = randomRange(100, 200);
-  } else if (tier < 0.85) {
-    startY = randomRange(50, 100);
-  } else {
-    startY = randomRange(200, 250);
-  }
-
-  const hasNearbyObstacle = state.obstacles.some(obs => {
-    const obsCenterY = obs.y + obs.height / 2;
-    return Math.abs(startY - obsCenterY) < FLYING_OBSTACLE_SAFE_DISTANCE;
-  });
-
-  if (hasNearbyObstacle) return;
-
-  const velocityX = -(FLYING_OBSTACLE_BASE_SPEED * speedMultiplier);
-  const verticalDrift = (Math.random() * 2 - 1);
-  const rotation = verticalDrift * 0.15;
-
-  state.flyingObstacles.push({
-    x: spawnX,
-    y: startY,
-    width: FLYING_OBSTACLE_WIDTH,
-    height: FLYING_OBSTACLE_HEIGHT,
-    velocityX,
-    verticalDrift: verticalDrift * speedMultiplier,
-    rotation,
-    wingPhase: Math.random() * Math.PI * 2,
-  });
-}
-
-function spawnCoin(state: GameState): void {
-  const isHigh = Math.random() < 0.2;
-  const y = isHigh
-    ? randomRange(40, GROUND_Y - 200)
-    : randomRange(GROUND_Y - 150, GROUND_Y - 20);
-
-  state.coins.push({
-    x: CANVAS_WIDTH + 20,
-    y,
-    radius: isHigh ? 14 : 12,
-    type: isHigh ? 'high' : 'normal',
-    sparklePhase: Math.random() * Math.PI * 2,
-  });
-}
-
-function spawnShrinker(state: GameState): void {
-  const y = randomRange(GROUND_Y - 180, GROUND_Y - 60);
-  state.shrinkers.push({ x: CANVAS_WIDTH + 20, y, radius: 15 });
-}
-
-function spawnIceShield(state: GameState): void {
-  if (state.iceShieldActive) return;
-
-  const y = randomRange(GROUND_Y - 180, GROUND_Y - 80);
-  state.coins.push({
-    x: CANVAS_WIDTH + 20,
-    y,
-    radius: 16,
-    type: 'iceShield',
-    sparklePhase: 0,
-  });
-}
-
-function spawnPlatform(state: GameState): void {
-  const tier = Math.random();
-  let y: number;
-  if (tier < 0.4) {
-    y = GROUND_Y - randomRange(60, 90);
-  } else if (tier < 0.75) {
-    y = GROUND_Y - randomRange(110, 160);
-  } else {
-    y = GROUND_Y - randomRange(180, 230);
-  }
-
-  const width = randomRange(70, 120);
-  const height = 14;
-
-  state.platforms.push({
-    x: CANVAS_WIDTH + 20,
-    y,
-    width,
-    height,
-    standTimer: 0,
-    breaking: false,
-    crackLevel: 0,
-  });
-}
-
-function spawnDoubleJumpPowerUp(state: GameState): void {
-  if (state.survivalTime < DOUBLE_JUMP_FIRST_DELAY) return;
-  if (state.doubleJumpActive) return;
-
-  const y = randomRange(GROUND_Y - 180, GROUND_Y - 80);
-  state.coins.push({
-    x: CANVAS_WIDTH + 20,
-    y,
-    radius: 16,
-    type: 'doubleJump',
-    sparklePhase: 0,
-  });
-}
-
-function addFloatingText(state: GameState, x: number, y: number, text: string, color: string): void {
-  state.floatingTexts.push({ x, y, text, color, alpha: 1.0, velocityY: -2 });
-}
-
-function addParticles(state: GameState, x: number, y: number, color: string, count: number): void {
-  for (let i = 0; i < count; i++) {
-    const angle = (Math.PI * 2 / count) * i + Math.random() * 0.5;
-    const speed = randomRange(2, 5);
-    state.particles.push({
-      x, y,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      radius: randomRange(2, 5),
-      color,
-      alpha: 1.0,
-      life: randomRange(20, 40),
-    });
-  }
-}
-
-function addIceShards(state: GameState, x: number, y: number): void {
-  for (let i = 0; i < 15; i++) {
-    const angle = (Math.PI * 2 / 15) * i + Math.random() * 0.3;
-    const speed = randomRange(3, 7);
-    state.particles.push({
-      x, y,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed - 2,
-      radius: randomRange(3, 6),
-      color: i % 2 === 0 ? '#67e8f9' : '#a5f3fc',
-      alpha: 1.0,
-      life: randomRange(30, 50),
-    });
-  }
-}
-
-function addSpeedLine(state: GameState): void {
-  state.speedLines.push({
-    x: CANVAS_WIDTH + 10,
-    y: randomRange(20, GROUND_Y - 20),
-    length: randomRange(20, 60),
-    speed: state.scrollSpeed * randomRange(2, 4),
-    alpha: 0.4 + Math.random() * 0.3,
-  });
-}
-
-// ==================== COLLISION DETECTION ====================
-
-function handleObstacleHit(state: GameState, obsX: number, obsY: number): void {
-  if (state.iceShieldActive) {
-    state.iceShieldActive = false;
-    state.iceShieldTimer = 0;
-    
-    addIceShards(state, HERO_X, state.heroY);
-    addFloatingText(state, HERO_X, state.heroY - state.heroRadius - 20, 'Shield Broken!', '#06b6d4');
-    
-    return;
-  }
-
-  state.heroRadius *= 1.15;
-  if (state.heroRadius > state.maxRadiusReached) state.maxRadiusReached = state.heroRadius;
-
-  state.flashTimer = 15;
-  state.squishTimer = 12;
-  state.screenShakeTimer = SCREEN_SHAKE_DURATION;
-  state.invincibilityTimer = INVINCIBILITY_DURATION;
-  state.hitAnimationTimer = HIT_ANIMATION_DURATION;
-
-  addParticles(state, obsX, obsY, '#ff4444', 8);
-  addFloatingText(state, HERO_X, state.heroY - state.heroRadius - 15, 'Ouch!', '#ef4444');
-
-  if (state.heroRadius >= MAX_RADIUS) {
-    state.isGameOver = true;
-    if (state.score > state.highScore) {
-      state.highScore = state.score;
-      state.isNewRecord = true;
-      localStorage.setItem(HIGH_SCORE_KEY, state.score.toString());
-    }
-  }
-}
-
-function checkCollisions(state: GameState): void {
-  const heroR = state.heroRadius * HITBOX_SHRINK;
-
-  if (state.invincibilityTimer <= 0) {
-    for (let i = state.obstacles.length - 1; i >= 0; i--) {
-      const obs = state.obstacles[i];
-      if (circleRectCollision(HERO_X, state.heroY, heroR, obs.x, obs.y, obs.width, obs.height)) {
-        handleObstacleHit(state, obs.x + obs.width / 2, obs.y + obs.height / 2);
-        state.obstacles.splice(i, 1);
-        break;
-      }
-    }
-  }
-
-  if (state.invincibilityTimer <= 0) {
-    for (let i = state.flyingObstacles.length - 1; i >= 0; i--) {
-      const bird = state.flyingObstacles[i];
-      if (circleCircleCollision(HERO_X, state.heroY, heroR, bird.x, bird.y, FLYING_OBSTACLE_HITBOX / 2)) {
-        handleObstacleHit(state, bird.x, bird.y);
-        state.flyingObstacles.splice(i, 1);
-        break;
-      }
-    }
-  }
-
-  for (let i = state.coins.length - 1; i >= 0; i--) {
-    const coin = state.coins[i];
-    if (circleCircleCollision(HERO_X, state.heroY, heroR, coin.x, coin.y, coin.radius * HITBOX_SHRINK)) {
-      if (coin.type === 'doubleJump') {
-        state.doubleJumpActive = true;
-        state.doubleJumpTimer = DOUBLE_JUMP_DURATION;
-        state.hasDoubleJumped = false;
-        state.doubleJumpReadyTimer = 120;
-        addFloatingText(state, coin.x, coin.y - 20, '2x JUMP!', '#a855f7');
-        addParticles(state, coin.x, coin.y, '#c084fc', 12);
-      } else if (coin.type === 'iceShield') {
-        state.iceShieldActive = true;
-        state.iceShieldTimer = ICE_SHIELD_DURATION;
-        addFloatingText(state, coin.x, coin.y - 20, 'SHIELD!', '#06b6d4');
-        addParticles(state, coin.x, coin.y, '#67e8f9', 10);
-      } else if (coin.type === 'high') {
-        state.score += 25;
-        addFloatingText(state, coin.x, coin.y - 20, '+25', '#fbbf24');
-        addParticles(state, coin.x, coin.y, '#fcd34d', 10);
-      } else {
-        state.score += 10;
-        addFloatingText(state, coin.x, coin.y - 20, '+10', '#f59e0b');
-        addParticles(state, coin.x, coin.y, '#fbbf24', 6);
-      }
-      state.coins.splice(i, 1);
-    }
-  }
-
-  for (let i = state.shrinkers.length - 1; i >= 0; i--) {
-    const shrinker = state.shrinkers[i];
-    if (circleCircleCollision(HERO_X, state.heroY, heroR, shrinker.x, shrinker.y, shrinker.radius * HITBOX_SHRINK)) {
-      state.heroRadius *= 0.8;
-      if (state.heroRadius < INITIAL_RADIUS) state.heroRadius = INITIAL_RADIUS;
-      state.score += 5;
-      addFloatingText(state, shrinker.x, shrinker.y - 20, '+5', '#10b981');
-      addParticles(state, shrinker.x, shrinker.y, '#34d399', 10);
-      state.shrinkers.splice(i, 1);
-    }
-  }
-}
-
-// ==================== PLATFORM COLLISION ====================
-
-function checkPlatformLanding(state: GameState): Platform | null {
-  if (state.velocityY <= 0) return null;
-
-  const heroBottom = state.heroY + state.heroRadius;
-  const heroPrevBottom = heroBottom - state.velocityY;
-
-  for (const platform of state.platforms) {
-    if (platform.breaking && platform.crackLevel >= 3) continue;
-
-    const heroLeft = HERO_X - state.heroRadius * 0.6;
-    const heroRight = HERO_X + state.heroRadius * 0.6;
-    const platLeft = platform.x;
-    const platRight = platform.x + platform.width;
-
-    if (heroRight > platLeft && heroLeft < platRight) {
-      if (heroPrevBottom <= platform.y && heroBottom >= platform.y) {
-        return platform;
-      }
-    }
-  }
-  return null;
-}
-
-// ==================== MAIN APP COMPONENT ====================
-
+// ==================== MAIN COMPONENT ====================
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef<GameState>(createInitialState());
+  const gameStateRef = useRef<GameState>({
+    score: 0,
+    highScore: parseInt(localStorage.getItem(HIGH_SCORE_KEY) || '0'),
+    gameRunning: false,
+    gameStarted: false,
+  });
+
+  const playerRef = useRef<Player>({
+    x: 100,
+    y: GROUND_Y - 50,
+    width: 40,
+    height: 50,
+    velocityY: 0,
+    isJumping: false,
+    isSliding: false,
+    isInvincible: false,
+    invincibilityTime: 0,
+    faceDirection: 1,
+    shrinkFactor: 1,
+    blinkTimer: 0,
+  });
+
+  const platformsRef = useRef<Platform[]>([]);
+  const groundObstaclesRef = useRef<GroundObstacle[]>([]);
+  const flyingObstaclesRef = useRef<FlyingObstacle[]>([]);
+  const coinsRef = useRef<Coin[]>([]);
+  const iceShieldsRef = useRef<IceShield[]>([]);
+  const shrinkersRef = useRef<Shrinker[]>([]);
+
+  const timersRef = useRef({
+    obstacleSpawnTimer: 0,
+    coinSpawnTimer: 0,
+    platformSpawnTimer: 0,
+    birdSpawnTimer: 0,
+    shrinkTimer: 0,
+    speedMultiplier: 1,
+    gameStartTime: 0,
+    lastTime: 0,
+  });
+
+  const keysRef = useRef<Record<string, boolean>>({});
   const animFrameRef = useRef<number>(0);
 
-  const handleJump = useCallback(() => {
-    const state = stateRef.current;
-    if (state.isGameOver || state.isPaused) return;
+  // ==================== INITIALIZATION ====================
+  const initGame = useCallback(() => {
+    const player = playerRef.current;
+    player.x = 100;
+    player.y = GROUND_Y - player.height;
+    player.velocityY = 0;
+    player.isJumping = false;
+    player.isSliding = false;
+    player.isInvincible = false;
+    player.invincibilityTime = 0;
+    player.shrinkFactor = 1;
+    player.blinkTimer = 0;
 
-    if (state.isGrounded || state.onPlatform) {
-      state.velocityY = JUMP_FORCE;
-      state.isGrounded = false;
-      state.onPlatform = null;
-      state.hasDoubleJumped = false;
-    } else if (state.doubleJumpActive && !state.hasDoubleJumped) {
-      state.velocityY = DOUBLE_JUMP_FORCE;
-      state.hasDoubleJumped = true;
-      addParticles(state, HERO_X, state.heroY, '#c084fc', 8);
-    }
+    platformsRef.current = [];
+    groundObstaclesRef.current = [];
+    flyingObstaclesRef.current = [];
+    coinsRef.current = [];
+    iceShieldsRef.current = [];
+    shrinkersRef.current = [];
+
+    const state = gameStateRef.current;
+    state.score = 0;
+    state.gameRunning = true;
+    state.gameStarted = true;
+
+    const timers = timersRef.current;
+    timers.obstacleSpawnTimer = 0;
+    timers.coinSpawnTimer = 0;
+    timers.platformSpawnTimer = 0;
+    timers.birdSpawnTimer = 0;
+    timers.shrinkTimer = 0;
+    timers.speedMultiplier = 1;
+    timers.gameStartTime = Date.now();
   }, []);
 
-  const handleRestart = useCallback(() => {
-    stateRef.current = createInitialState();
-  }, []);
-
-  const togglePause = useCallback(() => {
-    const state = stateRef.current;
-    if (state.isGameOver) return;
-    state.isPaused = !state.isPaused;
-  }, []);
-
-  // ==================== UPDATE ====================
-  const update = useCallback((state: GameState) => {
-    if (state.isGameOver || state.isPaused) return;
-
-    state.frameCount++;
-    state.survivalTime++;
-
-    state.velocityY += GRAVITY;
-    state.heroY += state.velocityY;
-
-    const landedPlatform = checkPlatformLanding(state);
-    if (landedPlatform) {
-      state.heroY = landedPlatform.y - state.heroRadius;
-      state.velocityY = 0;
-      state.isGrounded = false;
-      state.onPlatform = landedPlatform;
-      state.hasDoubleJumped = false;
-    }
-
-    if (state.onPlatform) {
-      const heroLeft = HERO_X - state.heroRadius * 0.6;
-      const heroRight = HERO_X + state.heroRadius * 0.6;
-      const plat = state.onPlatform;
-      const platLeft = plat.x;
-      const platRight = plat.x + plat.width;
-
-      if (heroRight > platLeft && heroLeft < platRight) {
-        plat.standTimer++;
-        if (plat.standTimer >= PLATFORM_BREAK_TIME) {
-          plat.crackLevel = 3;
-        } else if (plat.standTimer >= PLATFORM_CRACK_START) {
-          plat.crackLevel = Math.floor((plat.standTimer - PLATFORM_CRACK_START) / ((PLATFORM_BREAK_TIME - PLATFORM_CRACK_START) / 3)) + 1;
-          plat.breaking = true;
-        }
-      } else {
-        state.onPlatform = null;
-      }
-    }
-
-    if (state.heroY >= GROUND_Y - state.heroRadius) {
-      state.heroY = GROUND_Y - state.heroRadius;
-      state.velocityY = 0;
-      state.isGrounded = true;
-      state.onPlatform = null;
-      state.hasDoubleJumped = false;
-    }
-
-    if (state.onPlatform && state.velocityY > 0) {
-      const heroBottom = state.heroY + state.heroRadius;
-      if (heroBottom > state.onPlatform.y + 20) {
-        state.onPlatform = null;
-      }
-    }
-
-    if (state.doubleJumpActive) {
-      state.doubleJumpTimer--;
-      if (state.doubleJumpTimer <= 0) {
-        state.doubleJumpActive = false;
-        state.hasDoubleJumped = false;
-      }
-    }
-    if (state.doubleJumpReadyTimer > 0) state.doubleJumpReadyTimer--;
-
-    if (state.iceShieldActive) {
-      state.iceShieldTimer--;
-      if (state.iceShieldTimer <= 0) {
-        state.iceShieldActive = false;
-      }
-    }
-
-    state.scrollOffset += state.scrollSpeed;
-    if (state.scrollOffset >= LINE_SPACING) {
-      state.scrollOffset -= LINE_SPACING;
-    }
-
-    for (let i = state.obstacles.length - 1; i >= 0; i--) {
-      state.obstacles[i].x -= state.scrollSpeed;
-      if (state.obstacles[i].x + state.obstacles[i].width < -50) state.obstacles.splice(i, 1);
-    }
-
-    for (let i = state.flyingObstacles.length - 1; i >= 0; i--) {
-      const bird = state.flyingObstacles[i];
-      bird.x += bird.velocityX;
-      bird.y += bird.verticalDrift;
-      bird.wingPhase += 0.2;
-
-      if (bird.x < -50 || bird.y > CANVAS_HEIGHT || bird.y < -100) {
-        state.flyingObstacles.splice(i, 1);
-      }
-    }
-
-    for (let i = state.coins.length - 1; i >= 0; i--) {
-      state.coins[i].x -= state.scrollSpeed;
-      if (state.coins[i].x < -50) state.coins.splice(i, 1);
-    }
-
-    for (let i = state.shrinkers.length - 1; i >= 0; i--) {
-      state.shrinkers[i].x -= state.scrollSpeed;
-      if (state.shrinkers[i].x < -50) state.shrinkers.splice(i, 1);
-    }
-
-    for (let i = state.platforms.length - 1; i >= 0; i--) {
-      const plat = state.platforms[i];
-      plat.x -= state.scrollSpeed;
-
-      if (plat.x + plat.width < -50 || plat.crackLevel >= 3) {
-        if (state.onPlatform === plat) {
-          state.onPlatform = null;
-        }
-        if (plat.crackLevel >= 3) {
-          addParticles(state, plat.x + plat.width / 2, plat.y, '#92400e', 6);
-        }
-        state.platforms.splice(i, 1);
-      }
-    }
-
-    for (let i = state.floatingTexts.length - 1; i >= 0; i--) {
-      const ft = state.floatingTexts[i];
-      ft.y += ft.velocityY;
-      ft.alpha -= 0.015;
-      if (ft.alpha <= 0) state.floatingTexts.splice(i, 1);
-    }
-
-    for (let i = state.particles.length - 1; i >= 0; i--) {
-      const p = state.particles[i];
-      p.x += p.vx;
-      p.y += p.vy;
-      p.vy += 0.1;
-      p.life--;
-      p.alpha = p.life / 40;
-      if (p.life <= 0) state.particles.splice(i, 1);
-    }
-
-    for (let i = state.speedLines.length - 1; i >= 0; i--) {
-      const sl = state.speedLines[i];
-      sl.x -= sl.speed;
-      sl.alpha -= 0.02;
-      if (sl.x + sl.length < 0 || sl.alpha <= 0) state.speedLines.splice(i, 1);
-    }
-
-    if (state.frameCount % Math.max(2, Math.floor(10 - state.scrollSpeed)) === 0) {
-      addSpeedLine(state);
-    }
-
-    if (state.flashTimer > 0) state.flashTimer--;
-    if (state.invincibilityTimer > 0) state.invincibilityTimer--;
-    if (state.hitAnimationTimer > 0) state.hitAnimationTimer--;
-
-    if (state.screenShakeTimer > 0) {
-      state.screenShakeTimer--;
-      state.screenShakeX = (Math.random() - 0.5) * 5;
-      state.screenShakeY = (Math.random() - 0.5) * 5;
-    } else {
-      state.screenShakeX = 0;
-      state.screenShakeY = 0;
-    }
-
-    if (state.squishTimer > 0) {
-      state.squishTimer--;
-      const progress = state.squishTimer / 12;
-      state.squishScaleX = 1 + progress * 0.3;
-      state.squishScaleY = 1 - progress * 0.2;
-    } else {
-      state.squishScaleX = 1;
-      state.squishScaleY = 1;
-    }
-
-    state.speedTimer++;
-    if (state.speedTimer >= 180) {
-      state.speedTimer = 0;
-      const maxSpeed = state.baseSpeed * SPEED_CAP_MULTIPLIER;
-      if (state.scrollSpeed < maxSpeed) {
-        state.scrollSpeed *= 1.04;
-        if (state.scrollSpeed > maxSpeed) state.scrollSpeed = maxSpeed;
-      }
-    }
-
-    state.spawnRateTimer++;
-    if (state.spawnRateTimer >= 300) {
-      state.spawnRateTimer = 0;
-      state.minObstacleInterval = Math.max(36, state.minObstacleInterval - 6);
-    }
-
-    state.obstacleTimer++;
-    if (state.obstacleTimer >= state.obstacleInterval) {
-      state.obstacleTimer = 0;
-      spawnObstacle(state);
-      state.obstacleInterval = randomRange(state.minObstacleInterval, state.minObstacleInterval + 60);
-    }
-
-    state.flyingObstacleTimer++;
-    const speedMultiplier = state.scrollSpeed / state.baseSpeed;
-    const flyingIntervalAdjusted = Math.max(
-      120,
-      Math.floor(state.flyingObstacleInterval / (1 + speedMultiplier * 0.15))
-    );
-    if (state.flyingObstacleTimer >= flyingIntervalAdjusted) {
-      state.flyingObstacleTimer = 0;
-      spawnFlyingObstacle(state);
-      state.flyingObstacleInterval = randomRange(FLYING_OBSTACLE_SPAWN_MIN, FLYING_OBSTACLE_SPAWN_MAX);
-    }
-
-    state.coinTimer++;
-    const coinBaseInterval = 45 + Math.floor(state.survivalTime / 1800) * 5;
-    if (state.coinTimer >= state.coinInterval) {
-      state.coinTimer = 0;
-      spawnCoin(state);
-      state.coinInterval = randomRange(coinBaseInterval, coinBaseInterval + 45);
-    }
-
-    state.shrinkerTimer++;
-    const shrinkerReduction = Math.min(120, Math.floor(state.survivalTime / 1800) * 15);
-    if (state.shrinkerTimer >= state.shrinkerInterval) {
-      state.shrinkerTimer = 0;
-      spawnShrinker(state);
-      state.shrinkerInterval = randomRange(
-        Math.max(300, 480 - shrinkerReduction),
-        Math.max(420, 720 - shrinkerReduction)
-      );
-    }
-
-    state.platformTimer++;
-    const platformIntervalAdjusted = Math.max(60, state.platformInterval - Math.floor(state.scrollSpeed * 5));
-    if (state.platformTimer >= platformIntervalAdjusted) {
-      state.platformTimer = 0;
-      spawnPlatform(state);
-      state.platformInterval = randomRange(90, 200);
-    }
-
-    state.doubleJumpSpawnTimer++;
-    const djInterval = randomRange(DOUBLE_JUMP_SPAWN_MIN, DOUBLE_JUMP_SPAWN_MAX);
-    if (state.doubleJumpSpawnTimer >= djInterval) {
-      state.doubleJumpSpawnTimer = 0;
-      spawnDoubleJumpPowerUp(state);
-    }
-
-    state.iceShieldSpawnTimer++;
-    const iceInterval = randomRange(ICE_SHIELD_SPAWN_MIN, ICE_SHIELD_SPAWN_MAX);
-    if (state.iceShieldSpawnTimer >= iceInterval) {
-      state.iceShieldSpawnTimer = 0;
-      spawnIceShield(state);
-    }
-
-    checkCollisions(state);
-  }, []);
-
-  // ==================== DRAW ====================
-  const draw = useCallback((ctx: CanvasRenderingContext2D, state: GameState) => {
+  // ==================== DRAW FUNCTIONS ====================
+  const drawPlayer = useCallback((ctx: CanvasRenderingContext2D) => {
+    const player = playerRef.current;
     ctx.save();
+    ctx.translate(player.x + player.width / 2, player.y + player.height / 2);
+    ctx.scale(player.faceDirection, 1);
+    ctx.scale(player.shrinkFactor, player.shrinkFactor);
 
-    if (state.screenShakeTimer > 0) {
-      ctx.translate(state.screenShakeX, state.screenShakeY);
-    }
+    // Body
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(-player.width / 2, -player.height / 2, player.width, player.height);
 
-    ctx.fillStyle = '#d1d5db';
-    ctx.fillRect(-5, -5, CANVAS_WIDTH + 10, CANVAS_HEIGHT + 10);
-
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-    ctx.lineWidth = 2;
-    const numLines = Math.ceil(CANVAS_WIDTH / LINE_SPACING) + 2;
-    for (let i = 0; i < numLines; i++) {
-      const lineX = i * LINE_SPACING - state.scrollOffset;
-      ctx.beginPath();
-      ctx.moveTo(lineX, 0);
-      ctx.lineTo(lineX, GROUND_Y);
-      ctx.stroke();
-    }
-
-    for (const sl of state.speedLines) {
-      ctx.globalAlpha = Math.max(0, sl.alpha);
-      ctx.strokeStyle = 'rgba(100, 100, 100, 0.5)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(sl.x, sl.y);
-      ctx.lineTo(sl.x + sl.length, sl.y);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-
-    ctx.fillStyle = '#1f2937';
-    ctx.fillRect(0, GROUND_Y, CANVAS_WIDTH, CANVAS_HEIGHT - GROUND_Y);
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 3;
+    // Head
     ctx.beginPath();
-    ctx.moveTo(0, GROUND_Y);
-    ctx.lineTo(CANVAS_WIDTH, GROUND_Y);
+    ctx.arc(0, -player.height / 3, 15, 0, Math.PI * 2);
+    ctx.fillStyle = '#f1c40f';
+    ctx.fill();
+
+    // Eyes
+    ctx.beginPath();
+    ctx.arc(-5, -player.height / 3 - 3, 3, 0, Math.PI * 2);
+    ctx.arc(5, -player.height / 3 - 3, 3, 0, Math.PI * 2);
+    ctx.fillStyle = 'white';
+    ctx.fill();
+
+    // Pupils
+    ctx.beginPath();
+    ctx.arc(-5, -player.height / 3 - 3, 1.5, 0, Math.PI * 2);
+    ctx.arc(5, -player.height / 3 - 3, 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = 'black';
+    ctx.fill();
+
+    // Mouth
+    ctx.beginPath();
+    ctx.arc(0, -player.height / 3 + 2, 5, 0, Math.PI);
+    ctx.strokeStyle = 'black';
+    ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    for (const plat of state.platforms) {
-      if (plat.crackLevel >= 3) continue;
+    // Legs
+    ctx.fillStyle = '#2980b9';
+    ctx.fillRect(-10, player.height / 2 - 15, 8, 15);
+    ctx.fillRect(2, player.height / 2 - 15, 8, 15);
 
-      let drawX = plat.x;
-      let drawY = plat.y;
-      if (plat.breaking) {
-        drawX += (Math.random() - 0.5) * plat.crackLevel * 2;
-        drawY += (Math.random() - 0.5) * plat.crackLevel;
-      }
+    ctx.restore();
+  }, []);
 
-      ctx.fillStyle = '#92400e';
-      ctx.fillRect(drawX, drawY, plat.width, plat.height);
+  const drawPlatforms = useCallback((ctx: CanvasRenderingContext2D) => {
+    platformsRef.current.forEach(platform => {
+      ctx.fillStyle = '#27ae60';
+      ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+      ctx.fillStyle = '#2ecc71';
+      ctx.fillRect(platform.x, platform.y, platform.width, 5);
+    });
+  }, []);
 
-      ctx.strokeStyle = '#78350f';
-      ctx.lineWidth = 1;
-      for (let g = 0; g < 3; g++) {
-        const gy = drawY + 3 + g * 4;
+  const drawGroundObstacles = useCallback((ctx: CanvasRenderingContext2D) => {
+    groundObstaclesRef.current.forEach(obstacle => {
+      ctx.fillStyle = '#e74c3c';
+      ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+
+      for (let i = 0; i < obstacle.width; i += 10) {
         ctx.beginPath();
-        ctx.moveTo(drawX + 2, gy);
-        ctx.lineTo(drawX + plat.width - 2, gy);
-        ctx.stroke();
+        ctx.moveTo(obstacle.x + i, obstacle.y);
+        ctx.lineTo(obstacle.x + i + 5, obstacle.y - 10);
+        ctx.lineTo(obstacle.x + i + 10, obstacle.y);
+        ctx.closePath();
+        ctx.fillStyle = '#c0392b';
+        ctx.fill();
       }
+    });
+  }, []);
 
-      ctx.strokeStyle = '#451a03';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(drawX, drawY, plat.width, plat.height);
-
-      ctx.fillStyle = '#b45309';
-      ctx.fillRect(drawX, drawY, plat.width, 3);
-
-      if (plat.crackLevel >= 1) {
-        ctx.strokeStyle = '#1c1917';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(drawX + plat.width * 0.3, drawY);
-        ctx.lineTo(drawX + plat.width * 0.35, drawY + plat.height * 0.5);
-        ctx.lineTo(drawX + plat.width * 0.28, drawY + plat.height);
-        ctx.stroke();
-      }
-      if (plat.crackLevel >= 2) {
-        ctx.beginPath();
-        ctx.moveTo(drawX + plat.width * 0.7, drawY);
-        ctx.lineTo(drawX + plat.width * 0.65, drawY + plat.height * 0.6);
-        ctx.lineTo(drawX + plat.width * 0.72, drawY + plat.height);
-        ctx.stroke();
-      }
-      if (plat.crackLevel >= 3) {
-        ctx.beginPath();
-        ctx.moveTo(drawX + plat.width * 0.45, drawY + 2);
-        ctx.lineTo(drawX + plat.width * 0.55, drawY + plat.height - 2);
-        ctx.moveTo(drawX + plat.width * 0.55, drawY + 2);
-        ctx.lineTo(drawX + plat.width * 0.45, drawY + plat.height - 2);
-        ctx.stroke();
-      }
-    }
-
-    for (const obs of state.obstacles) {
-      ctx.fillStyle = '#dc2626';
-      ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
-      ctx.fillStyle = '#ef4444';
-      ctx.beginPath();
-      ctx.moveTo(obs.x, obs.y);
-      ctx.lineTo(obs.x + obs.width / 2, obs.y - 10);
-      ctx.lineTo(obs.x + obs.width, obs.y);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = '#991b1b';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(obs.x, obs.y, obs.width, obs.height);
-    }
-
-    for (const bird of state.flyingObstacles) {
+  const drawFlyingObstacles = useCallback((ctx: CanvasRenderingContext2D) => {
+    flyingObstaclesRef.current.forEach(bird => {
       ctx.save();
-      ctx.translate(bird.x, bird.y);
+      ctx.translate(bird.x + 15, bird.y + 15);
       ctx.rotate(bird.rotation);
 
-      ctx.fillStyle = '#dc2626';
+      ctx.fillStyle = '#e74c3c';
       ctx.beginPath();
-      ctx.moveTo(-bird.width / 2, 0);
-      ctx.lineTo(0, -bird.height / 2);
-      ctx.lineTo(bird.width / 2, 0);
-      ctx.lineTo(0, bird.height / 2);
+      ctx.moveTo(0, -15);
+      ctx.lineTo(15, 0);
+      ctx.lineTo(0, 15);
+      ctx.lineTo(-15, 0);
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = '#991b1b';
-      ctx.lineWidth = 2;
-      ctx.stroke();
 
-      const wingOffset = Math.sin(bird.wingPhase) * bird.height * 0.4;
-      ctx.fillStyle = '#ef4444';
-      
+      ctx.fillStyle = '#c0392b';
       ctx.beginPath();
-      ctx.moveTo(-bird.width * 0.2, -bird.height * 0.1);
-      ctx.lineTo(0, -bird.height * 0.5 - wingOffset);
-      ctx.lineTo(bird.width * 0.2, -bird.height * 0.1);
+      ctx.moveTo(-10, -5);
+      ctx.lineTo(-20, -10);
+      ctx.lineTo(-10, 0);
       ctx.closePath();
       ctx.fill();
-      ctx.stroke();
 
       ctx.beginPath();
-      ctx.moveTo(-bird.width * 0.2, bird.height * 0.1);
-      ctx.lineTo(0, bird.height * 0.5 + wingOffset);
-      ctx.lineTo(bird.width * 0.2, bird.height * 0.1);
+      ctx.moveTo(10, -5);
+      ctx.lineTo(20, -10);
+      ctx.lineTo(10, 0);
       ctx.closePath();
       ctx.fill();
-      ctx.stroke();
 
       ctx.restore();
-    }
+    });
+  }, []);
 
-    for (const coin of state.coins) {
-      if (coin.type === 'doubleJump') {
-        const pulse = Math.sin(state.frameCount * 0.15) * 3 + 3;
-        ctx.beginPath();
-        ctx.arc(coin.x, coin.y, coin.radius + pulse + 4, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(168, 85, 247, 0.2)';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
-        ctx.fillStyle = '#a855f7';
-        ctx.fill();
-        ctx.strokeStyle = '#7c3aed';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 11px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('2x', coin.x, coin.y);
-        const sparkleAngle = state.frameCount * 0.05;
-        for (let s = 0; s < 4; s++) {
-          const sa = sparkleAngle + (Math.PI / 2) * s;
-          const sx = coin.x + Math.cos(sa) * (coin.radius + 6);
-          const sy = coin.y + Math.sin(sa) * (coin.radius + 6);
-          ctx.fillStyle = 'rgba(196, 181, 253, 0.8)';
-          ctx.beginPath();
-          ctx.arc(sx, sy, 2, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      } else if (coin.type === 'iceShield') {
-        const pulse = Math.sin(state.frameCount * 0.12) * 3 + 3;
-        ctx.beginPath();
-        ctx.arc(coin.x, coin.y, coin.radius + pulse + 5, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(103, 232, 249, 0.25)';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
-        ctx.fillStyle = '#06b6d4';
-        ctx.fill();
-        ctx.strokeStyle = '#0891b2';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        for (let i = 0; i < 6; i++) {
-          const angle = (Math.PI / 3) * i - Math.PI / 2;
-          const hx = coin.x + Math.cos(angle) * coin.radius * 0.5;
-          const hy = coin.y + Math.sin(angle) * coin.radius * 0.5;
-          if (i === 0) ctx.moveTo(hx, hy);
-          else ctx.lineTo(hx, hy);
-        }
-        ctx.closePath();
-        ctx.stroke();
-        const sparkleAngle = state.frameCount * 0.06;
-        for (let s = 0; s < 3; s++) {
-          const sa = sparkleAngle + (Math.PI * 2 / 3) * s;
-          const sr = coin.radius + 8;
-          const sx = coin.x + Math.cos(sa) * sr;
-          const sy = coin.y + Math.sin(sa) * sr;
-          ctx.fillStyle = 'rgba(165, 243, 252, 0.9)';
-          ctx.beginPath();
-          ctx.arc(sx, sy, 2, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      } else if (coin.type === 'high') {
-        const sparkle = Math.sin(state.frameCount * 0.12 + coin.sparklePhase) * 0.3 + 0.7;
-        ctx.beginPath();
-        ctx.arc(coin.x, coin.y, coin.radius + 5, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(252, 211, 77, ${sparkle * 0.3})`;
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
-        ctx.fillStyle = '#fbbf24';
-        ctx.fill();
-        ctx.strokeStyle = '#d97706';
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
-        ctx.fillStyle = '#92400e';
-        ctx.font = 'bold 13px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('★', coin.x, coin.y + 1);
-        for (let s = 0; s < 3; s++) {
-          const sa = state.frameCount * 0.08 + (Math.PI * 2 / 3) * s;
-          const sr = coin.radius + 8 + Math.sin(state.frameCount * 0.1 + s) * 3;
-          const sx = coin.x + Math.cos(sa) * sr;
-          const sy = coin.y + Math.sin(sa) * sr;
-          ctx.globalAlpha = sparkle;
-          ctx.fillStyle = '#fef3c7';
-          ctx.beginPath();
-          ctx.arc(sx, sy, 1.5, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        ctx.globalAlpha = 1;
-      } else {
-        ctx.beginPath();
-        ctx.arc(coin.x, coin.y, coin.radius + 3, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(251, 191, 36, 0.3)';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
-        ctx.fillStyle = '#f59e0b';
-        ctx.fill();
-        ctx.strokeStyle = '#d97706';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.fillStyle = '#92400e';
-        ctx.font = 'bold 12px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('$', coin.x, coin.y + 1);
-      }
-    }
-
-    for (const shrinker of state.shrinkers) {
-      const pulse = Math.sin(state.frameCount * 0.1) * 3 + 3;
+  const drawCoins = useCallback((ctx: CanvasRenderingContext2D) => {
+    coinsRef.current.forEach(coin => {
+      ctx.fillStyle = '#f1c40f';
       ctx.beginPath();
-      ctx.arc(shrinker.x, shrinker.y, shrinker.radius + pulse, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(52, 211, 153, 0.2)';
+      ctx.arc(coin.x + coin.width / 2, coin.y + coin.height / 2, coin.width / 2, 0, Math.PI * 2);
       ctx.fill();
-      ctx.beginPath();
-      ctx.arc(shrinker.x, shrinker.y, shrinker.radius, 0, Math.PI * 2);
-      ctx.fillStyle = '#10b981';
-      ctx.fill();
-      ctx.strokeStyle = '#059669';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.fillStyle = '#fff';
-      ctx.font = 'bold 14px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('−', shrinker.x, shrinker.y);
-    }
-
-    for (const p of state.particles) {
-      ctx.globalAlpha = Math.max(0, p.alpha);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fillStyle = p.color;
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-
-    ctx.save();
-    ctx.translate(HERO_X, state.heroY);
-    ctx.scale(state.squishScaleX, state.squishScaleY);
-
-    if (state.iceShieldActive) {
-      const shieldPulse = Math.sin(state.frameCount * 0.12) * 4 + 8;
-      const shieldAlpha = 0.25 + Math.sin(state.frameCount * 0.1) * 0.1;
-      ctx.beginPath();
-      ctx.arc(0, 0, state.heroRadius + shieldPulse, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(103, 232, 249, ${shieldAlpha})`;
-      ctx.fill();
-      ctx.strokeStyle = `rgba(6, 182, 212, ${shieldAlpha * 1.5})`;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-
-    if (state.doubleJumpActive) {
-      const auraPulse = Math.sin(state.frameCount * 0.1) * 5 + 10;
-      const auraAlpha = 0.2 + Math.sin(state.frameCount * 0.08) * 0.1;
-      ctx.beginPath();
-      ctx.arc(0, 0, state.heroRadius + auraPulse + (state.iceShieldActive ? 12 : 0), 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(168, 85, 247, ${auraAlpha})`;
-      ctx.fill();
-      ctx.strokeStyle = `rgba(196, 181, 253, ${auraAlpha * 0.5})`;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-
-    const isInvincibleVisible = state.invincibilityTimer <= 0 || Math.floor(state.invincibilityTimer / 3) % 2 === 0;
-
-    if (isInvincibleVisible) {
-      if (state.flashTimer > 0) {
-        const flashAlpha = state.flashTimer / 15;
-        ctx.beginPath();
-        ctx.arc(0, 0, state.heroRadius + 5, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(239, 68, 68, ${flashAlpha * 0.5})`;
-        ctx.fill();
-      }
-
-      let heroColor: string;
-      if (state.hitAnimationTimer > 0) {
-        const hitProgress = state.hitAnimationTimer / HIT_ANIMATION_DURATION;
-        const r = 239;
-        const g = Math.floor(68 + (1 - hitProgress) * 80);
-        const b = Math.floor(68 * (1 - hitProgress));
-        heroColor = `rgb(${r}, ${g}, ${b})`;
-      } else if (state.flashTimer > 0) {
-        heroColor = `rgb(${Math.min(255, 37 + state.flashTimer * 15)}, ${Math.max(0, 99 - state.flashTimer * 5)}, ${Math.max(0, 235 - state.flashTimer * 15)})`;
-      } else {
-        heroColor = '#2563eb';
-      }
-
-      ctx.beginPath();
-      ctx.arc(0, 0, state.heroRadius, 0, Math.PI * 2);
-      ctx.fillStyle = heroColor;
-      ctx.fill();
-      ctx.strokeStyle = state.hitAnimationTimer > 0 ? '#991b1b' : '#1d4ed8';
-      ctx.lineWidth = 3;
-      ctx.stroke();
-
-      if (state.hitAnimationTimer <= 0) {
-        ctx.beginPath();
-        ctx.arc(-state.heroRadius * 0.25, -state.heroRadius * 0.25, state.heroRadius * 0.35, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-        ctx.fill();
-      }
-
-      if (state.hitAnimationTimer > 0) {
-        const r = state.heroRadius;
-        const eyeY = -r * 0.15;
-        const eyeSize = r * 0.2;
-
-        ctx.strokeStyle = '#1a1a1a';
-        ctx.lineWidth = Math.max(2, r * 0.08);
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(-r * 0.35 - eyeSize, eyeY - eyeSize * 0.7);
-        ctx.lineTo(-r * 0.35, eyeY);
-        ctx.lineTo(-r * 0.35 - eyeSize, eyeY + eyeSize * 0.7);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(r * 0.35 + eyeSize, eyeY - eyeSize * 0.7);
-        ctx.lineTo(r * 0.35, eyeY);
-        ctx.lineTo(r * 0.35 + eyeSize, eyeY + eyeSize * 0.7);
-        ctx.stroke();
-
-        const mouthY = r * 0.25;
-        const mouthW = r * 0.2;
-        const mouthH = r * 0.25;
-        const wobble = Math.sin(state.hitAnimationTimer * 0.5) * r * 0.03;
-        ctx.beginPath();
-        ctx.ellipse(wobble, mouthY, mouthW, mouthH, 0, 0, Math.PI * 2);
-        ctx.fillStyle = '#1a1a1a';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(wobble, mouthY + mouthH * 0.2, mouthW * 0.5, mouthH * 0.4, 0, 0, Math.PI * 2);
-        ctx.fillStyle = '#991b1b';
-        ctx.fill();
-
-        ctx.lineCap = 'butt';
-      } else {
-        const eyeOffset = state.heroRadius * 0.3;
-        ctx.beginPath();
-        ctx.arc(eyeOffset, -eyeOffset * 0.5, state.heroRadius * 0.2, 0, Math.PI * 2);
-        ctx.fillStyle = '#fff';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(eyeOffset + 2, -eyeOffset * 0.5, state.heroRadius * 0.1, 0, Math.PI * 2);
-        ctx.fillStyle = '#1a1a1a';
-        ctx.fill();
-
-        ctx.strokeStyle = '#1a1a1a';
-        ctx.lineWidth = Math.max(1.5, state.heroRadius * 0.06);
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.arc(eyeOffset * 0.3, state.heroRadius * 0.15, state.heroRadius * 0.15, 0.1 * Math.PI, 0.9 * Math.PI);
-        ctx.stroke();
-        ctx.lineCap = 'butt';
-      }
-    }
-
-    ctx.restore();
-
-    for (const ft of state.floatingTexts) {
-      ctx.globalAlpha = Math.max(0, ft.alpha);
-      ctx.fillStyle = ft.color;
-      ctx.font = 'bold 18px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(ft.text, ft.x, ft.y);
-    }
-    ctx.globalAlpha = 1;
-
-    if (state.doubleJumpReadyTimer > 0) {
-      const alpha = Math.min(1, state.doubleJumpReadyTimer / 30);
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = '#a855f7';
-      ctx.font = 'bold 22px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('⚡ DOUBLE JUMP READY! ⚡', CANVAS_WIDTH / 2, 70);
-      ctx.globalAlpha = 1;
-    }
-
-    ctx.fillStyle = '#1f2937';
-    ctx.font = 'bold 20px Arial';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText(`Score: ${state.score}`, 15, 12);
-
-    ctx.fillStyle = '#6b7280';
-    ctx.font = '14px Arial';
-    ctx.fillText(`Best: ${state.highScore}`, 15, 36);
-
-    ctx.fillStyle = '#4b5563';
-    ctx.font = '14px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(`⏱ ${formatTime(state.survivalTime)}`, CANVAS_WIDTH / 2, 36);
-
-    const speedMultiplier = (state.scrollSpeed / state.baseSpeed).toFixed(1);
-    const speedColor = state.scrollSpeed >= state.baseSpeed * 2.5 ? '#ef4444' :
-                       state.scrollSpeed >= state.baseSpeed * 1.5 ? '#f59e0b' : '#22c55e';
-    ctx.fillStyle = speedColor;
-    ctx.font = 'bold 14px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(`⚡ Speed: x${speedMultiplier}`, CANVAS_WIDTH / 2, 52);
-
-    if (state.doubleJumpActive) {
-      const djSecondsLeft = Math.ceil(state.doubleJumpTimer / 60);
-      ctx.fillStyle = '#a855f7';
-      ctx.font = 'bold 14px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText(`2x JUMP: ${djSecondsLeft}s`, CANVAS_WIDTH / 2, 68);
-    }
-
-    if (state.iceShieldActive) {
-      const shieldSecondsLeft = Math.ceil(state.iceShieldTimer / 60);
-      ctx.fillStyle = '#06b6d4';
-      ctx.font = 'bold 14px Arial';
-      ctx.textAlign = 'left';
-      ctx.fillText(`🛡️ SHIELD: ${shieldSecondsLeft}s`, 15, 54);
-    }
-
-    const sizePercent = Math.round((state.heroRadius / MAX_RADIUS) * 100);
-    ctx.fillStyle = '#1f2937';
-    ctx.font = 'bold 20px Arial';
-    ctx.textAlign = 'right';
-    ctx.fillText(`Size: ${sizePercent}%`, CANVAS_WIDTH - 15, 12);
-
-    const barX = 150;
-    const barY = 12;
-    const barWidth = CANVAS_WIDTH - 300;
-    const barHeight = 18;
-    const fillWidth = (state.heroRadius / MAX_RADIUS) * barWidth;
-
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
-    ctx.fillRect(barX, barY, barWidth, barHeight);
-
-    let barColor: string;
-    if (sizePercent < 50) barColor = '#22c55e';
-    else if (sizePercent < 80) barColor = '#eab308';
-    else barColor = '#ef4444';
-
-    ctx.fillStyle = barColor;
-    ctx.fillRect(barX, barY, Math.min(fillWidth, barWidth), barHeight);
-
-    ctx.strokeStyle = '#374151';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(barX, barY, barWidth, barHeight);
-
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 11px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('DANGER', barX + barWidth / 2, barY + barHeight / 2);
-
-    ctx.restore();
-
-    if (state.isPaused) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
       ctx.fillStyle = '#fff';
-      ctx.font = 'bold 48px Arial';
+      ctx.beginPath();
+      ctx.arc(coin.x + coin.width / 2 - 3, coin.y + coin.height / 2 - 3, 2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }, []);
+
+  const drawIceShields = useCallback((ctx: CanvasRenderingContext2D) => {
+    iceShieldsRef.current.forEach(shield => {
+      ctx.fillStyle = '#3498db';
+      ctx.beginPath();
+      ctx.arc(shield.x + shield.width / 2, shield.y + shield.height / 2, shield.width / 2, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#aed6f1';
+      ctx.beginPath();
+      ctx.arc(shield.x + shield.width / 2, shield.y + shield.height / 2, shield.width / 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = '#d6eaf8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(shield.x + shield.width / 2, shield.y + 5);
+      ctx.lineTo(shield.x + shield.width / 2, shield.y + shield.height - 5);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(shield.x + 5, shield.y + shield.height / 2);
+      ctx.lineTo(shield.x + shield.width - 5, shield.y + shield.height / 2);
+      ctx.stroke();
+    });
+  }, []);
+
+  const drawShrinkers = useCallback((ctx: CanvasRenderingContext2D) => {
+    shrinkersRef.current.forEach(shrinker => {
+      ctx.fillStyle = '#9b59b6';
+      ctx.beginPath();
+      ctx.arc(shrinker.x + shrinker.width / 2, shrinker.y + shrinker.height / 2, shrinker.width / 2, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = '#d2b4de';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(shrinker.x + shrinker.width / 2, shrinker.y + 5);
+      ctx.lineTo(shrinker.x + shrinker.width / 2, shrinker.y + shrinker.height - 5);
+      ctx.stroke();
+
+      ctx.font = '20px Arial';
+      ctx.fillStyle = 'white';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('⏸ PAUSED', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 40);
+      ctx.fillText('S', shrinker.x + shrinker.width / 2, shrinker.y + shrinker.height / 2);
+    });
+  }, []);
 
-      ctx.fillStyle = '#9ca3af';
-      ctx.font = '18px Arial';
-      ctx.fillText('Press P or Esc to resume', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 10);
+  const drawBackground = useCallback((ctx: CanvasRenderingContext2D) => {
+    const skyGradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+    skyGradient.addColorStop(0, '#87CEEB');
+    skyGradient.addColorStop(1, '#E0F7FA');
+    ctx.fillStyle = skyGradient;
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-      ctx.fillStyle = '#e5e7eb';
-      ctx.font = '16px Arial';
-      ctx.fillText(`Score: ${state.score}  |  Size: ${sizePercent}%  |  Time: ${formatTime(state.survivalTime)}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 50);
+    ctx.beginPath();
+    ctx.arc(CANVAS_WIDTH - 50, 50, 30, 0, Math.PI * 2);
+    ctx.fillStyle = '#FFD700';
+    ctx.fill();
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    const drawCloud = (x: number, y: number, radius: number) => {
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.arc(x + radius * 0.8, y - radius * 0.5, radius * 0.8, 0, Math.PI * 2);
+      ctx.arc(x + radius * 1.5, y, radius * 0.9, 0, Math.PI * 2);
+      ctx.arc(x + radius * 0.8, y + radius * 0.5, radius * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+    };
+    drawCloud(100, 80, 30);
+    drawCloud(300, 60, 40);
+    drawCloud(500, 100, 35);
+    drawCloud(700, 70, 25);
+
+    ctx.fillStyle = '#8B4513';
+    ctx.fillRect(0, GROUND_Y, CANVAS_WIDTH, CANVAS_HEIGHT - GROUND_Y);
+
+    ctx.fillStyle = '#2E8B57';
+    ctx.fillRect(0, GROUND_Y - 10, CANVAS_WIDTH, 10);
+  }, []);
+
+  // ==================== SPAWN FUNCTIONS ====================
+  const spawnPlatform = useCallback(() => {
+    const timers = timersRef.current;
+    if (timers.platformSpawnTimer <= 0) {
+      const platformWidth = 100 + Math.random() * 100;
+      const platformHeight = 20;
+      const platformX = CANVAS_WIDTH;
+      const platformY = GROUND_Y - 100 - Math.random() * 150;
+
+      platformsRef.current.push({
+        x: platformX,
+        y: platformY,
+        width: platformWidth,
+        height: platformHeight,
+      });
+
+      timers.platformSpawnTimer = PLATFORM_SPAWN_INTERVAL;
+    } else {
+      timers.platformSpawnTimer--;
     }
+  }, []);
 
-    if (state.isGameOver) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  const spawnGroundObstacle = useCallback(() => {
+    const timers = timersRef.current;
+    if (timers.obstacleSpawnTimer <= 0) {
+      const obstacleWidth = 30 + Math.random() * 40;
+      const obstacleHeight = 30 + Math.random() * 40;
+      const obstacleX = CANVAS_WIDTH;
+      const obstacleY = GROUND_Y - obstacleHeight;
 
-      ctx.fillStyle = '#ef4444';
-      ctx.font = 'bold 48px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('GAME OVER', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 80);
+      groundObstaclesRef.current.push({
+        x: obstacleX,
+        y: obstacleY,
+        width: obstacleWidth,
+        height: obstacleHeight,
+      });
 
-      ctx.fillStyle = '#fff';
-      ctx.font = '24px Arial';
-      ctx.fillText(`Final Score: ${state.score}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 30);
+      timers.obstacleSpawnTimer = OBSTACLE_SPAWN_INTERVAL;
+    } else {
+      timers.obstacleSpawnTimer--;
+    }
+  }, []);
 
-      if (state.isNewRecord) {
-        const pulse = Math.sin(state.frameCount * 0.08) * 0.3 + 0.7;
-        ctx.fillStyle = `rgba(251, 191, 36, ${pulse})`;
-        ctx.font = 'bold 22px Arial';
-        ctx.fillText(`🏆 NEW RECORD! Best: ${state.highScore}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 5);
+  const spawnFlyingObstacle = useCallback(() => {
+    const timers = timersRef.current;
+    const elapsedSeconds = (Date.now() - timers.gameStartTime) / 1000;
+    if (elapsedSeconds < 10) return;
+
+    if (timers.birdSpawnTimer <= 0) {
+      const baseInterval = Math.random() * (FLYING_OBSTACLE_SPAWN_MAX - FLYING_OBSTACLE_SPAWN_MIN) + FLYING_OBSTACLE_SPAWN_MIN;
+      const adjustedInterval = baseInterval / (1 + timers.speedMultiplier * 0.15);
+
+      const rand = Math.random();
+      let spawnY: number;
+
+      if (rand < 0.6) {
+        spawnY = 100 + Math.random() * 100;
+      } else if (rand < 0.85) {
+        spawnY = 50 + Math.random() * 50;
       } else {
-        ctx.fillStyle = '#9ca3af';
-        ctx.font = '18px Arial';
-        ctx.fillText(`Best Score: ${state.highScore}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 5);
+        spawnY = 200 + Math.random() * 50;
       }
 
-      ctx.fillStyle = '#d1d5db';
-      ctx.font = '18px Arial';
-      ctx.fillText(`Max Size: ${Math.round(state.maxRadiusReached)}px`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 40);
-      ctx.fillText(`Time Survived: ${formatTime(state.survivalTime)}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 65);
+      const isSafeToSpawn = !groundObstaclesRef.current.some(obstacle => {
+        return (
+          obstacle.x < CANVAS_WIDTH + 50 &&
+          obstacle.x + obstacle.width > CANVAS_WIDTH - 50 &&
+          Math.abs(obstacle.y - spawnY) < FLYING_OBSTACLE_SAFE_DISTANCE
+        );
+      });
 
-      ctx.fillStyle = '#6b7280';
-      ctx.font = '16px Arial';
-      ctx.fillText('Press R or Click to Restart', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 105);
+      if (isSafeToSpawn) {
+        const verticalDrift = FLYING_OBSTACLE_VERTICAL_DRIFT[Math.floor(Math.random() * FLYING_OBSTACLE_VERTICAL_DRIFT.length)];
+
+        flyingObstaclesRef.current.push({
+          x: CANVAS_WIDTH + 50,
+          y: spawnY,
+          width: 30,
+          height: 30,
+          verticalDrift: verticalDrift,
+          rotation: 0,
+        });
+      }
+
+      timers.birdSpawnTimer = adjustedInterval;
+    } else {
+      timers.birdSpawnTimer--;
+    }
+  }, []);
+
+  const spawnCoin = useCallback(() => {
+    const timers = timersRef.current;
+    if (timers.coinSpawnTimer <= 0) {
+      const coinX = CANVAS_WIDTH;
+      const coinY = GROUND_Y - 100 - Math.random() * 150;
+
+      coinsRef.current.push({
+        x: coinX,
+        y: coinY,
+        width: 20,
+        height: 20,
+      });
+
+      timers.coinSpawnTimer = COIN_SPAWN_INTERVAL;
+    } else {
+      timers.coinSpawnTimer--;
+    }
+  }, []);
+
+  const spawnIceShield = useCallback(() => {
+    if (Math.random() < 0.002) {
+      const shieldX = CANVAS_WIDTH;
+      const shieldY = GROUND_Y - 100 - Math.random() * 150;
+
+      iceShieldsRef.current.push({
+        x: shieldX,
+        y: shieldY,
+        width: 25,
+        height: 25,
+      });
+    }
+  }, []);
+
+  const spawnShrinker = useCallback(() => {
+    if (Math.random() < 0.0015) {
+      const shrinkerX = CANVAS_WIDTH;
+      const shrinkerY = GROUND_Y - 100 - Math.random() * 150;
+
+      shrinkersRef.current.push({
+        x: shrinkerX,
+        y: shrinkerY,
+        width: 25,
+        height: 25,
+      });
+    }
+  }, []);
+
+  // ==================== UPDATE FUNCTIONS ====================
+  const updateGameObjects = useCallback((deltaTime: number) => {
+    const player = playerRef.current;
+    const state = gameStateRef.current;
+    const timers = timersRef.current;
+    const keys = keysRef.current;
+
+    if (!state.gameRunning) return;
+
+    // Player movement
+    if (keys['Space'] || keys['ArrowUp']) {
+      if (!player.isJumping && player.y >= GROUND_Y - player.height) {
+        player.velocityY = JUMP_FORCE;
+        player.isJumping = true;
+      }
     }
 
+    if (keys['ArrowDown']) {
+      if (!player.isJumping && !player.isSliding && player.y >= GROUND_Y - player.height) {
+        player.isSliding = true;
+        player.height = 30;
+        player.y = GROUND_Y - player.height;
+      }
+    } else {
+      if (player.isSliding) {
+        player.isSliding = false;
+        player.height = 50;
+        player.y = GROUND_Y - player.height;
+      }
+    }
+
+    // Gravity
+    if (player.isJumping || player.y < GROUND_Y - player.height) {
+      player.velocityY += GRAVITY;
+      player.y += player.velocityY;
+
+      if (player.y >= GROUND_Y - player.height) {
+        player.y = GROUND_Y - player.height;
+        player.velocityY = 0;
+        player.isJumping = false;
+      }
+    }
+
+    // Invincibility
+    if (player.isInvincible) {
+      player.invincibilityTime -= deltaTime;
+      if (player.invincibilityTime <= 0) {
+        player.isInvincible = false;
+        player.invincibilityTime = 0;
+      }
+    }
+
+    // Shrink timer
+    if (timers.shrinkTimer > 0) {
+      timers.shrinkTimer -= deltaTime;
+      if (timers.shrinkTimer <= 0) {
+        player.shrinkFactor = 1;
+      }
+    }
+
+    // Blink timer
+    if (player.isInvincible) {
+      player.blinkTimer += deltaTime;
+    } else {
+      player.blinkTimer = 0;
+    }
+
+    // Update platforms
+    platformsRef.current.forEach(platform => {
+      platform.x -= 5 * timers.speedMultiplier;
+    });
+    platformsRef.current = platformsRef.current.filter(platform => platform.x + platform.width > 0);
+
+    // Update ground obstacles
+    groundObstaclesRef.current.forEach(obstacle => {
+      obstacle.x -= 5 * timers.speedMultiplier;
+    });
+    groundObstaclesRef.current = groundObstaclesRef.current.filter(obstacle => obstacle.x + obstacle.width > 0);
+
+    // Update flying obstacles
+    flyingObstaclesRef.current.forEach(bird => {
+      bird.x -= FLYING_OBSTACLE_BASE_SPEED * timers.speedMultiplier;
+      bird.y += bird.verticalDrift * timers.speedMultiplier;
+      bird.rotation = bird.verticalDrift * 0.05;
+    });
+    flyingObstaclesRef.current = flyingObstaclesRef.current.filter(bird =>
+      bird.x > -50 && bird.y < CANVAS_HEIGHT && bird.y > -100
+    );
+
+    // Update coins
+    coinsRef.current.forEach(coin => {
+      coin.x -= 5 * timers.speedMultiplier;
+    });
+    coinsRef.current = coinsRef.current.filter(coin => coin.x + coin.width > 0);
+
+    // Update ice shields
+    iceShieldsRef.current.forEach(shield => {
+      shield.x -= 5 * timers.speedMultiplier;
+    });
+    iceShieldsRef.current = iceShieldsRef.current.filter(shield => shield.x + shield.width > 0);
+
+    // Update shrinkers
+    shrinkersRef.current.forEach(shrinker => {
+      shrinker.x -= 5 * timers.speedMultiplier;
+    });
+    shrinkersRef.current = shrinkersRef.current.filter(shrinker => shrinker.x + shrinker.width > 0);
+
+    // Increase speed
+    timers.speedMultiplier = 1 + (Date.now() - timers.gameStartTime) / 10000;
+  }, []);
+
+  const checkCollisions = useCallback(() => {
+    const player = playerRef.current;
+    const state = gameStateRef.current;
+
+    // Ground obstacles
+    for (const obstacle of groundObstaclesRef.current) {
+      if (
+        player.x < obstacle.x + obstacle.width &&
+        player.x + player.width > obstacle.x &&
+        player.y < obstacle.y + obstacle.height &&
+        player.y + player.height > obstacle.y
+      ) {
+        if (!player.isInvincible) {
+          state.gameRunning = false;
+          if (state.score > state.highScore) {
+            state.highScore = state.score;
+            localStorage.setItem(HIGH_SCORE_KEY, state.highScore.toString());
+          }
+          return;
+        }
+      }
+    }
+
+    // Flying obstacles
+    for (const bird of flyingObstaclesRef.current) {
+      const playerHitBox = {
+        x: player.x + 5,
+        y: player.y + 5,
+        width: player.width - 10,
+        height: player.height - 10,
+      };
+
+      const birdHitBox = {
+        x: bird.x + (bird.width - FLYING_OBSTACLE_HITBOX) / 2,
+        y: bird.y + (bird.height - FLYING_OBSTACLE_HITBOX) / 2,
+        width: FLYING_OBSTACLE_HITBOX,
+        height: FLYING_OBSTACLE_HITBOX,
+      };
+
+      if (
+        playerHitBox.x < birdHitBox.x + birdHitBox.width &&
+        playerHitBox.x + playerHitBox.width > birdHitBox.x &&
+        playerHitBox.y < birdHitBox.y + birdHitBox.height &&
+        playerHitBox.y + playerHitBox.height > birdHitBox.y
+      ) {
+        if (!player.isInvincible) {
+          state.gameRunning = false;
+          if (state.score > state.highScore) {
+            state.highScore = state.score;
+            localStorage.setItem(HIGH_SCORE_KEY, state.highScore.toString());
+          }
+          return;
+        }
+      }
+    }
+
+    // Coins
+    for (let i = coinsRef.current.length - 1; i >= 0; i--) {
+      const coin = coinsRef.current[i];
+      if (
+        player.x < coin.x + coin.width &&
+        player.x + player.width > coin.x &&
+        player.y < coin.y + coin.height &&
+        player.y + player.height > coin.y
+      ) {
+        coinsRef.current.splice(i, 1);
+        state.score += 10;
+      }
+    }
+
+    // Ice shields
+    for (let i = iceShieldsRef.current.length - 1; i >= 0; i--) {
+      const shield = iceShieldsRef.current[i];
+      if (
+        player.x < shield.x + shield.width &&
+        player.x + player.width > shield.x &&
+        player.y < shield.y + shield.height &&
+        player.y + player.height > shield.y
+      ) {
+        iceShieldsRef.current.splice(i, 1);
+        player.isInvincible = true;
+        player.invincibilityTime = 3000;
+      }
+    }
+
+    // Shrinkers
+    for (let i = shrinkersRef.current.length - 1; i >= 0; i--) {
+      const shrinker = shrinkersRef.current[i];
+      if (
+        player.x < shrinker.x + shrinker.width &&
+        player.x + player.width > shrinker.x &&
+        player.y < shrinker.y + shrinker.height &&
+        player.y + player.height > shrinker.y
+      ) {
+        shrinkersRef.current.splice(i, 1);
+        player.shrinkFactor = 0.7;
+        timersRef.current.shrinkTimer = 5000;
+      }
+    }
+
+    // Platform collision
+    let onPlatform = false;
+    for (const platform of platformsRef.current) {
+      if (
+        player.x + player.width > platform.x &&
+        player.x < platform.x + platform.width &&
+        player.y + player.height <= platform.y + 5 &&
+        player.y + player.height + player.velocityY > platform.y
+      ) {
+        player.y = platform.y - player.height;
+        player.velocityY = 0;
+        player.isJumping = false;
+        onPlatform = true;
+        break;
+      }
+    }
+
+    if (!onPlatform && player.y < GROUND_Y - player.height) {
+      player.isJumping = true;
+    }
   }, []);
 
   // ==================== GAME LOOP ====================
-  const gameLoop = useCallback(() => {
+  const gameLoop = useCallback((timestamp: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const state = stateRef.current;
-    update(state);
-    draw(ctx, state);
+    const state = gameStateRef.current;
+    const timers = timersRef.current;
 
-    if (state.isPaused || state.isGameOver) {
-      state.frameCount++;
+    const deltaTime = timestamp - timers.lastTime;
+    timers.lastTime = timestamp;
+
+    ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    drawBackground(ctx);
+
+    if (state.gameRunning) {
+      updateGameObjects(deltaTime);
+      spawnPlatform();
+      spawnGroundObstacle();
+      spawnFlyingObstacle();
+      spawnCoin();
+      spawnIceShield();
+      spawnShrinker();
+      checkCollisions();
+
+      if (deltaTime > 0) {
+        state.score += deltaTime / 100;
+      }
+    }
+
+    drawPlatforms(ctx);
+    drawGroundObstacles(ctx);
+    drawFlyingObstacles(ctx);
+    drawCoins(ctx);
+    drawIceShields(ctx);
+    drawShrinkers(ctx);
+
+    const player = playerRef.current;
+    if (!player.isInvincible || Math.floor(player.blinkTimer / 100) % 2 === 0) {
+      drawPlayer(ctx);
     }
 
     animFrameRef.current = requestAnimationFrame(gameLoop);
-  }, [update, draw]);
+  }, [
+    drawBackground,
+    drawPlatforms,
+    drawGroundObstacles,
+    drawFlyingObstacles,
+    drawCoins,
+    drawIceShields,
+    drawShrinkers,
+    drawPlayer,
+    updateGameObjects,
+    spawnPlatform,
+    spawnGroundObstacle,
+    spawnFlyingObstacle,
+    spawnCoin,
+    spawnIceShield,
+    spawnShrinker,
+    checkCollisions,
+  ]);
 
   // ==================== EFFECTS & EVENT LISTENERS ====================
   useEffect(() => {
+    timersRef.current.lastTime = performance.now();
     animFrameRef.current = requestAnimationFrame(gameLoop);
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      const state = stateRef.current;
-
-      if (e.code === 'Space' || e.key === ' ') {
-        e.preventDefault();
-        if (state.isGameOver) {
-          handleRestart();
-        } else if (!state.isPaused) {
-          handleJump();
-        }
-      }
-
-      if (e.code === 'KeyP' || e.key === 'p' || e.key === 'P' || e.code === 'Escape') {
-        togglePause();
-      }
-
-      if ((e.code === 'KeyR' || e.key === 'r' || e.key === 'R') && state.isGameOver) {
-        handleRestart();
-      }
+      keysRef.current[e.key] = true;
     };
 
-    const handleMouseDown = (e: MouseEvent) => {
-      if (e.button === 0) {
-        const state = stateRef.current;
-        if (state.isGameOver) {
-          handleRestart();
-        } else if (!state.isPaused) {
-          handleJump();
-        }
-      }
-    };
-
-    const handleTouchStart = (e: TouchEvent) => {
-      e.preventDefault();
-      const state = stateRef.current;
-      if (state.isGameOver) {
-        handleRestart();
-      } else if (!state.isPaused) {
-        handleJump();
-      }
+    const handleKeyUp = (e: KeyboardEvent) => {
+      keysRef.current[e.key] = false;
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('mousedown', handleMouseDown);
-    window.addEventListener('touchstart', handleTouchStart, { passive: false });
+    window.addEventListener('keyup', handleKeyUp);
 
     return () => {
       cancelAnimationFrame(animFrameRef.current);
       window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('mousedown', handleMouseDown);
-      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [gameLoop, handleJump, handleRestart, togglePause]);
+  }, [gameLoop]);
 
   // ==================== RENDER ====================
+  const state = gameStateRef.current;
+  const player = playerRef.current;
+
   return (
-    <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center p-4 select-none">
-      <h1 className="text-3xl font-bold text-white mb-2">
-        🏃 Hero Runner
-      </h1>
-      <p className="text-gray-400 mb-4 text-sm">
-        <kbd className="px-2 py-1 bg-gray-700 rounded text-white text-xs font-mono">SPACE</kbd> / <span className="text-blue-400 font-semibold">Click</span> Jump
-        &nbsp;•&nbsp;
-        <kbd className="px-2 py-1 bg-gray-700 rounded text-white text-xs font-mono">P</kbd> / <kbd className="px-2 py-1 bg-gray-700 rounded text-white text-xs font-mono">ESC</kbd> Pause
-      </p>
-      <canvas
-        ref={canvasRef}
-        width={CANVAS_WIDTH}
-        height={CANVAS_HEIGHT}
-        className="border-2 border-gray-600 rounded-lg shadow-2xl cursor-pointer max-w-full"
-      />
-      <div className="mt-4 flex flex-wrap gap-3 justify-center text-xs text-gray-500">
-        <span>🟥 Obstacles = Grow</span>
-        <span>🔴 Birds = Fly & Grow</span>
-        <span>🟢 Green = Shrink +5</span>
+    <div className="min-h-screen bg-slate-800 flex flex-col items-center justify-center p-4">
+      <div className="relative">
+        <canvas
+          ref={canvasRef}
+          width={CANVAS_WIDTH}
+          height={CANVAS_HEIGHT}
+          className="border-4 border-slate-600 rounded-lg shadow-2xl"
+        />
+
+        {/* Score Display */}
+        <div className="absolute top-5 left-5 text-white text-2xl font-bold" style={{ textShadow: '2px 2px 4px rgba(0,0,0,0.7)' }}>
+          Score: {Math.floor(state.score)}
+        </div>
+
+        {/* High Score Display */}
+        <div className="absolute top-5 right-5 text-yellow-400 text-xl font-bold" style={{ textShadow: '2px 2px 4px rgba(0,0,0,0.7)' }}>
+          High Score: {state.highScore}
+        </div>
+
+        {/* Game Over Screen */}
+        {!state.gameRunning && state.gameStarted && (
+          <div className="absolute inset-0 bg-black/80 flex flex-col justify-center items-center text-white text-5xl font-bold" style={{ textShadow: '0 0 10px #ff0000' }}>
+            GAME OVER!
+            <button
+              onClick={initGame}
+              className="mt-5 px-6 py-3 bg-red-600 text-white text-2xl font-bold rounded-full hover:bg-red-700 transition-all hover:scale-110"
+            >
+              PLAY AGAIN
+            </button>
+          </div>
+        )}
+
+        {/* Start Screen */}
+        {!state.gameStarted && (
+          <div className="absolute inset-0 bg-black/80 flex flex-col justify-center items-center text-white text-center">
+            <h1 className="text-6xl font-bold mb-2 text-yellow-400" style={{ textShadow: '0 0 10px #f39c12, 0 0 20px #e67e22' }}>
+              HERO RUNNER
+            </h1>
+            <div className="text-xl max-w-[80%] leading-relaxed my-5">
+              <p>Dodge obstacles, collect coins, and avoid flying birds!</p>
+              <p className="mt-2">
+                Press <kbd className="px-2 py-1 bg-slate-700 rounded border border-slate-500 mx-1">SPACE</kbd> or <kbd className="px-2 py-1 bg-slate-700 rounded border border-slate-500 mx-1">↑</kbd> to jump
+              </p>
+              <p>
+                Press <kbd className="px-2 py-1 bg-slate-700 rounded border border-slate-500 mx-1">↓</kbd> to slide under obstacles
+              </p>
+              <p>Collect ice shields to become invincible!</p>
+            </div>
+            <button
+              onClick={initGame}
+              className="mt-8 px-8 py-4 bg-green-500 text-white text-3xl font-bold rounded-full hover:bg-green-600 transition-all hover:scale-110"
+            >
+              START GAME
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Legend */}
+      <div className="mt-4 flex flex-wrap gap-4 justify-center text-sm text-slate-400">
+        <span>🟥 Obstacles = Game Over</span>
+        <span>🔴 Birds = Game Over</span>
         <span>🟡 Coins = +10</span>
-        <span>⭐ Gold = +25</span>
-        <span>🟣 Purple = Double Jump</span>
-        <span>🔵 Blue = Ice Shield (1 hit)</span>
-        <span>🟫 Platforms = Jump higher</span>
+        <span>🔵 Ice Shield = Invincibility</span>
+        <span>🟣 Shrinker = Smaller Size</span>
+        <span>🟩 Platforms = Jump On</span>
       </div>
     </div>
   );
