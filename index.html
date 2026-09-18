@@ -1,97 +1,1296 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Hero Runner - HTML5 Canvas Game</title>
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
-    />
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Hero Runner - Level System</title>
     <style>
-      /* 内联样式确保主题色立即生效，避免闪烁 */
-      html,
-      body {
-        margin: 0;
-        padding: 0;
-        width: 100%;
-        height: 100%;
-      }
-      html.light,
-      html.light body {
-        background-color: #ffffff !important;
-        color: #000000;
-      }
-      html.dark,
-      html.dark body {
-        background-color: #1a1a1a !important;
-        color: #ffffff;
-      }
-    </style>
-    <script>
-      // 在 React 加载前立即设置主题，避免闪烁
-      (function () {
-        const isInIframe = window.self !== window.top;
-
-        function applyThemeToDOM(theme) {
-          document.documentElement.classList.remove("light", "dark");
-          document.documentElement.classList.add(theme);
-          document.documentElement.setAttribute("data-theme", theme);
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-
-        if (isInIframe) {
-          // 监听父窗口主动推送的主题消息
-          window.addEventListener("message", function (event) {
-            if (event.data && typeof event.data.theme === "string") {
-              const theme = event.data.theme;
-              if (theme === "light" || theme === "dark") {
-                applyThemeToDOM(theme);
-              }
+        
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 800px;
+            height: 400px;
+            border: 3px solid #fff;
+            border-radius: 10px;
+            box-shadow: 0 10px 50px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+        }
+        
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .screen-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            z-index: 100;
+            animation: fadeIn 0.3s ease-in;
+        }
+        
+        .screen-overlay.active {
+            display: flex;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .screen-title {
+            font-size: 48px;
+            font-weight: bold;
+            margin-bottom: 20px;
+            text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.7);
+        }
+        
+        .screen-subtitle {
+            font-size: 24px;
+            margin-bottom: 30px;
+            color: #ddd;
+        }
+        
+        .btn {
+            padding: 15px 40px;
+            font-size: 20px;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+        }
+        
+        .btn:active {
+            transform: translateY(0);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-secondary {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        /* Main Menu */
+        #mainMenu .level-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin: 20px 0;
+            max-width: 600px;
+        }
+        
+        .level-card {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        
+        .level-card:hover:not(.locked) {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.05);
+        }
+        
+        .level-card.locked {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .level-card.completed {
+            border-color: #4facfe;
+            background: rgba(79, 172, 254, 0.2);
+        }
+        
+        .level-name {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .level-time {
+            font-size: 14px;
+            color: #ddd;
+            margin-bottom: 5px;
+        }
+        
+        .level-difficulty {
+            font-size: 16px;
+            color: #ffd700;
+        }
+        
+        .level-lock {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 24px;
+        }
+        
+        .level-check {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 24px;
+            color: #4facfe;
+        }
+        
+        /* Level Complete */
+        .stars {
+            font-size: 48px;
+            margin: 20px 0;
+            color: #ffd700;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        
+        .star-empty {
+            color: #555;
+        }
+        
+        /* HUD */
+        #hud {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            padding: 10px;
+            display: none;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            font-size: 16px;
+            z-index: 50;
+        }
+        
+        #hud.active {
+            display: flex;
+        }
+        
+        .hud-left, .hud-center, .hud-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .hud-center {
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .level-indicator {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        
+        .timer {
+            font-size: 32px;
+            font-weight: bold;
+            color: #ffd700;
+        }
+        
+        .progress-bar {
+            width: 200px;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+            transition: width 0.3s ease;
+        }
+        
+        .score-display, .highscore-display, .speed-display {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        /* Level Start Announcement */
+        #levelAnnouncement {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 48px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.8);
+            z-index: 75;
+            display: none;
+            animation: announcementFade 2s ease-out;
+        }
+        
+        @keyframes announcementFade {
+            0% {
+                opacity: 0;
+                transform: translate(-50%, -50%) scale(0.5);
             }
-          });
-        } else {
-          // 非 iframe 环境，使用默认 light 主题
-          applyThemeToDOM("light");
+            20% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1.2);
+            }
+            80% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1);
+            }
+            100% {
+                opacity: 0;
+                transform: translate(-50%, -50%) scale(1);
+            }
         }
-      })();
-    </script>
-      <script>
-      (function () {
-        if (window.self === window.top) return;
-        var reported = {};
-        window.addEventListener("error", function (event) {
-          // 资源加载失败的 error 事件没有 message，此处仅上报 JS 运行时错误
-          if (!event || !event.message) return;
-          var key =
-            event.message + "|" + (event.filename || "") + "|" + (event.lineno || 0);
-          if (reported[key]) return; // 相同错误只上报一次，避免渲染循环刷屏
-          reported[key] = true;
-          try {
-            window.parent.postMessage(
-              {
-                type: "sandbox-runtime-error",
-                payload: {
-                  message: String(event.message).slice(0, 500),
-                  filename: event.filename || "",
-                  lineno: event.lineno || 0,
-                  colno: event.colno || 0,
-                  stack:
-                    event.error && event.error.stack
-                      ? String(event.error.stack).slice(0, 2000)
-                      : ""
+        
+        .powerup-indicator {
+            position: absolute;
+            top: 70px;
+            left: 10px;
+            color: white;
+            font-size: 14px;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.7);
+            z-index: 50;
+            display: none;
+        }
+        
+        .powerup-indicator.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="800" height="400"></canvas>
+        
+        <!-- HUD -->
+        <div id="hud">
+            <div class="hud-left">
+                <div class="score-display">Score: <span id="score">0</span></div>
+                <div class="highscore-display">Best: <span id="highScore">0</span></div>
+            </div>
+            <div class="hud-center">
+                <div class="level-indicator" id="levelName">Level 1: Forest Meadow</div>
+                <div class="timer" id="timer">60s</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill" style="width: 100%"></div>
+                </div>
+            </div>
+            <div class="hud-right">
+                <div class="speed-display">Speed: <span id="speed">1.0</span>x</div>
+            </div>
+        </div>
+        
+        <!-- Power-up Indicator -->
+        <div class="powerup-indicator" id="powerupIndicator">
+            <div>Ice Shield: <span id="iceShieldTime">0</span>s</div>
+            <div>Double Jump: <span id="doubleJumpTime">0</span>s</div>
+        </div>
+        
+        <!-- Level Start Announcement -->
+        <div id="levelAnnouncement"></div>
+        
+        <!-- Main Menu -->
+        <div id="mainMenu" class="screen-overlay active">
+            <div class="screen-title">🏃 Hero Runner</div>
+            <div class="screen-subtitle">Select a Level</div>
+            <div class="level-grid" id="levelGrid"></div>
+            <button class="btn btn-primary" id="continueBtn" style="display: none;">Continue</button>
+        </div>
+        
+        <!-- Level Complete -->
+        <div id="levelComplete" class="screen-overlay">
+            <div class="screen-title">✅ LEVEL COMPLETE!</div>
+            <div class="stars" id="stars">★★★</div>
+            <div class="screen-subtitle">
+                Score: <span id="finalScore">0</span><br>
+                High Score: <span id="finalHighScore">0</span>
+            </div>
+            <button class="btn btn-success" id="nextLevelBtn">Next Level</button>
+            <button class="btn btn-secondary" id="menuBtn1">Main Menu</button>
+        </div>
+        
+        <!-- Game Over -->
+        <div id="gameOver" class="screen-overlay">
+            <div class="screen-title">💀 GAME OVER</div>
+            <div class="screen-subtitle">
+                Score: <span id="gameOverScore">0</span><br>
+                High Score: <span id="gameOverHighScore">0</span>
+            </div>
+            <button class="btn btn-primary" id="retryBtn">Retry Level</button>
+            <button class="btn btn-secondary" id="menuBtn2">Main Menu</button>
+        </div>
+        
+        <!-- Pause Menu -->
+        <div id="pauseMenu" class="screen-overlay">
+            <div class="screen-title">⏸ PAUSED</div>
+            <button class="btn btn-primary" id="resumeBtn">Resume</button>
+            <button class="btn btn-secondary" id="menuBtn3">Main Menu</button>
+        </div>
+    </div>
+
+    <script>
+        // ==================== LEVEL DATA ====================
+        const levels = [
+            {
+                id: 1,
+                name: "Forest Meadow",
+                targetTime: 60,
+                background: "#87CEEB",
+                groundColor: "#228B22",
+                obstacleFrequency: 1.0,
+                birdFrequency: 0.3,
+                platformFrequency: 1.2,
+                speedGrowthRate: 0.008,
+                coinMultiplier: 1.2
+            },
+            {
+                id: 2,
+                name: "Desert Dunes",
+                targetTime: 90,
+                background: "#FFE4B5",
+                groundColor: "#D2691E",
+                obstacleFrequency: 1.2,
+                birdFrequency: 0.6,
+                platformFrequency: 0.9,
+                speedGrowthRate: 0.010,
+                coinMultiplier: 1.0
+            },
+            {
+                id: 3,
+                name: "Mountain Peak",
+                targetTime: 120,
+                background: "#E0E0E0",
+                groundColor: "#696969",
+                obstacleFrequency: 1.4,
+                birdFrequency: 0.9,
+                platformFrequency: 1.1,
+                speedGrowthRate: 0.012,
+                coinMultiplier: 1.0
+            },
+            {
+                id: 4,
+                name: "Volcanic Fury",
+                targetTime: 150,
+                background: "#2F1B1B",
+                groundColor: "#8B0000",
+                obstacleFrequency: 1.6,
+                birdFrequency: 1.2,
+                platformFrequency: 0.8,
+                speedGrowthRate: 0.015,
+                coinMultiplier: 0.9
+            },
+            {
+                id: 5,
+                name: "Cosmic Void",
+                targetTime: 180,
+                background: "#0D0221",
+                groundColor: "#4B0082",
+                obstacleFrequency: 1.8,
+                birdFrequency: 1.5,
+                platformFrequency: 1.0,
+                speedGrowthRate: 0.018,
+                coinMultiplier: 1.0
+            }
+        ];
+
+        // ==================== GAME CONSTANTS ====================
+        const GROUND_HEIGHT = 50;
+        const GRAVITY = 0.5;
+        const JUMP_FORCE = -12;
+        const OBSTACLE_SPEED_BASE = 5;
+        const FLYING_OBSTACLE_BASE_SPEED = 5;
+        const FLYING_OBSTACLE_SAFE_DISTANCE = 200;
+        const FLYING_OBSTACLE_SPAWN_MIN = 360;
+        const FLYING_OBSTACLE_SPAWN_MAX = 720;
+        const FLYING_OBSTACLE_FIRST_DELAY = 900;
+        const FLYING_OBSTACLE_LANES = [80, 150, 220, 300];
+        const FLYING_OBSTACLE_WIDTH = 30;
+        const FLYING_OBSTACLE_HEIGHT = 20;
+        const FLYING_OBSTACLE_HITBOX = 25;
+        const COIN_SIZE = 20;
+        const COIN_SPAWN_RATE = 0.005;
+
+        // ==================== GAME STATE ====================
+        const GameState = {
+            MENU: 'MENU',
+            PLAYING: 'PLAYING',
+            PAUSED: 'PAUSED',
+            LEVEL_COMPLETE: 'LEVEL_COMPLETE',
+            GAME_OVER: 'GAME_OVER'
+        };
+
+        let currentState = GameState.MENU;
+        let currentLevel = null;
+        let levelTimeRemaining = 0;
+        let levelStartTime = 0;
+
+        // ==================== GAME VARIABLES ====================
+        let canvas, ctx;
+        let hero = {
+            x: 100,
+            y: 0,
+            width: 40,
+            height: 40,
+            velocityY: 0,
+            isJumping: false,
+            isDoubleJumping: false,
+            faceDirection: 1
+        };
+
+        let platforms = [];
+        let obstacles = [];
+        let flyingObstacles = [];
+        let coins = [];
+        let score = 0;
+        let highScore = 0;
+        let speedMultiplier = 1.0;
+        let frames = 0;
+        let obstacleSpawnTimer = 0;
+        let flyingObstacleSpawnTimer = 0;
+
+        // Power-ups
+        let iceShieldActive = false;
+        let iceShieldTimer = 0;
+        let doubleJumpActive = false;
+        let doubleJumpTimer = 0;
+        let heroOriginalHeight = 40;
+        let heroOriginalWidth = 40;
+
+        // Progress tracking
+        let unlockedLevels = [1];
+        let completedLevels = [];
+        let levelBestScores = {};
+
+        // ==================== DOM ELEMENTS ====================
+        let scoreElement, highScoreElement, speedElement;
+        let levelNameElement, timerElement, progressFillElement;
+        let iceShieldTimeElement, doubleJumpTimeElement;
+        let powerupIndicator;
+        let levelAnnouncement;
+
+        // ==================== LOCAL STORAGE ====================
+        function saveProgress() {
+            const progress = {
+                unlockedLevels,
+                completedLevels,
+                levelBestScores
+            };
+            localStorage.setItem('heroRunnerProgress', JSON.stringify(progress));
+        }
+
+        function loadProgress() {
+            const saved = localStorage.getItem('heroRunnerProgress');
+            if (saved) {
+                const progress = JSON.parse(saved);
+                unlockedLevels = progress.unlockedLevels || [1];
+                completedLevels = progress.completedLevels || [];
+                levelBestScores = progress.levelBestScores || {};
+            }
+        }
+
+        function updateHighScore(levelId) {
+            if (!levelBestScores[levelId] || score > levelBestScores[levelId]) {
+                levelBestScores[levelId] = score;
+                saveProgress();
+            }
+            highScore = levelBestScores[levelId] || 0;
+        }
+
+        // ==================== INITIALIZATION ====================
+        function init() {
+            canvas = document.getElementById('gameCanvas');
+            ctx = canvas.getContext('2d');
+
+            scoreElement = document.getElementById('score');
+            highScoreElement = document.getElementById('highScore');
+            speedElement = document.getElementById('speed');
+            levelNameElement = document.getElementById('levelName');
+            timerElement = document.getElementById('timer');
+            progressFillElement = document.getElementById('progressFill');
+            iceShieldTimeElement = document.getElementById('iceShieldTime');
+            doubleJumpTimeElement = document.getElementById('doubleJumpTime');
+            powerupIndicator = document.getElementById('powerupIndicator');
+            levelAnnouncement = document.getElementById('levelAnnouncement');
+
+            loadProgress();
+            setupEventListeners();
+            showMainMenu();
+        }
+
+        function setupEventListeners() {
+            // Button listeners
+            document.getElementById('nextLevelBtn').addEventListener('click', nextLevel);
+            document.getElementById('menuBtn1').addEventListener('click', showMainMenu);
+            document.getElementById('retryBtn').addEventListener('click', retryLevel);
+            document.getElementById('menuBtn2').addEventListener('click', showMainMenu);
+            document.getElementById('resumeBtn').addEventListener('click', resumeGame);
+            document.getElementById('menuBtn3').addEventListener('click', showMainMenu);
+
+            // Keyboard controls
+            document.addEventListener('keydown', handleKeyDown);
+            document.addEventListener('keyup', handleKeyUp);
+
+            // Touch/mouse controls
+            canvas.addEventListener('touchstart', handleTouch);
+            canvas.addEventListener('touchend', handleTouchEnd);
+            canvas.addEventListener('mousedown', handleMouse);
+        }
+
+        // ==================== MENU SYSTEM ====================
+        function showMainMenu() {
+            currentState = GameState.MENU;
+            hideAllScreens();
+            document.getElementById('mainMenu').classList.add('active');
+            document.getElementById('hud').classList.remove('active');
+            powerupIndicator.classList.remove('active');
+            renderLevelGrid();
+        }
+
+        function renderLevelGrid() {
+            const grid = document.getElementById('levelGrid');
+            grid.innerHTML = '';
+
+            levels.forEach((level, index) => {
+                const card = document.createElement('div');
+                card.className = 'level-card';
+
+                const isUnlocked = unlockedLevels.includes(level.id);
+                const isCompleted = completedLevels.includes(level.id);
+
+                if (!isUnlocked) {
+                    card.classList.add('locked');
                 }
-              },
-              "*"
-            );
-          } catch (e) {
-            /* 上报失败不影响页面运行 */
-          }
-        });
-      })();
+                if (isCompleted) {
+                    card.classList.add('completed');
+                }
+
+                const difficulty = getDifficultyStars(level);
+                const bestScore = levelBestScores[level.id] || 0;
+
+                card.innerHTML = `
+                    <div class="level-name">${level.name}</div>
+                    <div class="level-time">Target: ${level.targetTime}s</div>
+                    <div class="level-difficulty">${difficulty}</div>
+                    ${!isUnlocked ? '<div class="level-lock">🔒</div>' : ''}
+                    ${isCompleted ? '<div class="level-check">✓</div>' : ''}
+                    ${bestScore > 0 ? `<div style="font-size: 12px; margin-top: 5px;">Best: ${bestScore}</div>` : ''}
+                `;
+
+                if (isUnlocked) {
+                    card.addEventListener('click', () => startLevel(level.id));
+                }
+
+                grid.appendChild(card);
+            });
+        }
+
+        function getDifficultyStars(level) {
+            const difficulty = level.obstacleFrequency + level.birdFrequency;
+            if (difficulty < 1.5) return '★☆☆';
+            if (difficulty < 2.5) return '★★☆';
+            return '★★★';
+        }
+
+        // ==================== LEVEL MANAGEMENT ====================
+        function startLevel(levelId) {
+            currentLevel = levels.find(l => l.id === levelId);
+            if (!currentLevel) return;
+
+            resetGame();
+            currentState = GameState.PLAYING;
+            hideAllScreens();
+            document.getElementById('hud').classList.add('active');
+            powerupIndicator.classList.add('active');
+
+            // Apply level settings
+            levelNameElement.textContent = `Level ${currentLevel.id}: ${currentLevel.name}`;
+            levelTimeRemaining = currentLevel.targetTime;
+            levelStartTime = Date.now();
+            updateTimerDisplay();
+
+            // Show level announcement
+            showLevelAnnouncement();
+
+            // Start game loop
+            animate();
+        }
+
+        function showLevelAnnouncement() {
+            levelAnnouncement.textContent = `Level ${currentLevel.id}: ${currentLevel.name}`;
+            levelAnnouncement.style.display = 'block';
+            setTimeout(() => {
+                levelAnnouncement.style.display = 'none';
+            }, 2000);
+        }
+
+        function updateTimerDisplay() {
+            const seconds = Math.ceil(levelTimeRemaining);
+            timerElement.textContent = `${seconds}s`;
+            
+            const progress = (levelTimeRemaining / currentLevel.targetTime) * 100;
+            progressFillElement.style.width = `${progress}%`;
+        }
+
+        function completeLevel() {
+            currentState = GameState.LEVEL_COMPLETE;
+            
+            // Calculate stars
+            const stars = calculateStars();
+            document.getElementById('stars').innerHTML = stars;
+            
+            // Update progress
+            if (!completedLevels.includes(currentLevel.id)) {
+                completedLevels.push(currentLevel.id);
+            }
+            
+            // Unlock next level
+            const nextLevelId = currentLevel.id + 1;
+            if (nextLevelId <= levels.length && !unlockedLevels.includes(nextLevelId)) {
+                unlockedLevels.push(nextLevelId);
+            }
+            
+            updateHighScore(currentLevel.id);
+            saveProgress();
+
+            // Show completion screen
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('finalHighScore').textContent = highScore;
+            
+            const nextLevelBtn = document.getElementById('nextLevelBtn');
+            if (currentLevel.id < levels.length) {
+                nextLevelBtn.style.display = 'block';
+            } else {
+                nextLevelBtn.style.display = 'none';
+            }
+
+            hideAllScreens();
+            document.getElementById('levelComplete').classList.add('active');
+        }
+
+        function calculateStars() {
+            let stars = 0;
+            
+            if (score > 1000 && hero.width < heroOriginalWidth * 1.5) {
+                stars = 3;
+            } else if (score > 500 && hero.width < heroOriginalWidth * 2) {
+                stars = 2;
+            } else {
+                stars = 1;
+            }
+            
+            let starHTML = '';
+            for (let i = 0; i < 3; i++) {
+                if (i < stars) {
+                    starHTML += '★';
+                } else {
+                    starHTML += '<span class="star-empty">★</span>';
+                }
+            }
+            return starHTML;
+        }
+
+        function nextLevel() {
+            if (currentLevel.id < levels.length) {
+                startLevel(currentLevel.id + 1);
+            }
+        }
+
+        function retryLevel() {
+            if (currentLevel) {
+                startLevel(currentLevel.id);
+            }
+        }
+
+        function gameOver() {
+            currentState = GameState.GAME_OVER;
+            updateHighScore(currentLevel.id);
+            
+            document.getElementById('gameOverScore').textContent = score;
+            document.getElementById('gameOverHighScore').textContent = highScore;
+            
+            hideAllScreens();
+            document.getElementById('gameOver').classList.add('active');
+        }
+
+        function pauseGame() {
+            if (currentState === GameState.PLAYING) {
+                currentState = GameState.PAUSED;
+                hideAllScreens();
+                document.getElementById('pauseMenu').classList.add('active');
+            }
+        }
+
+        function resumeGame() {
+            if (currentState === GameState.PAUSED) {
+                currentState = GameState.PLAYING;
+                hideAllScreens();
+                document.getElementById('hud').classList.add('active');
+                powerupIndicator.classList.add('active');
+                animate();
+            }
+        }
+
+        function hideAllScreens() {
+            document.querySelectorAll('.screen-overlay').forEach(screen => {
+                screen.classList.remove('active');
+            });
+        }
+
+        // ==================== GAME LOGIC ====================
+        function resetGame() {
+            hero.x = 100;
+            hero.y = canvas.height - GROUND_HEIGHT - hero.height;
+            hero.velocityY = 0;
+            hero.isJumping = false;
+            hero.isDoubleJumping = false;
+            hero.width = heroOriginalWidth;
+            hero.height = heroOriginalHeight;
+
+            platforms = [];
+            obstacles = [];
+            flyingObstacles = [];
+            coins = [];
+
+            score = 0;
+            speedMultiplier = 1.0;
+            frames = 0;
+            obstacleSpawnTimer = 0;
+            flyingObstacleSpawnTimer = 0;
+
+            iceShieldActive = false;
+            iceShieldTimer = 0;
+            doubleJumpActive = false;
+            doubleJumpTimer = 0;
+
+            scoreElement.textContent = score;
+            highScoreElement.textContent = levelBestScores[currentLevel.id] || 0;
+            speedElement.textContent = speedMultiplier.toFixed(1);
+            iceShieldTimeElement.textContent = '0';
+            doubleJumpTimeElement.textContent = '0';
+
+            createPlatform();
+        }
+
+        function createPlatform() {
+            const platformWidth = 100 + Math.random() * 100;
+            const platformX = canvas.width;
+            const platformY = canvas.height - GROUND_HEIGHT - 20 - Math.random() * 100;
+
+            platforms.push({
+                x: platformX,
+                y: platformY,
+                width: platformWidth,
+                height: 20
+            });
+        }
+
+        function createObstacle() {
+            const obstacleHeight = 20 + Math.random() * 30;
+            const obstacle = {
+                x: canvas.width,
+                y: canvas.height - GROUND_HEIGHT - obstacleHeight,
+                width: 20,
+                height: obstacleHeight
+            };
+            obstacles.push(obstacle);
+        }
+
+        function createFlyingObstacle() {
+            if (frames < FLYING_OBSTACLE_FIRST_DELAY) return;
+
+            const spawnX = canvas.width + 50;
+
+            let shouldSkip = false;
+            for (const obs of obstacles) {
+                const obsCenterX = obs.x + obs.width / 2;
+                if (Math.abs(obsCenterX - spawnX) < FLYING_OBSTACLE_SAFE_DISTANCE) {
+                    shouldSkip = true;
+                    break;
+                }
+            }
+
+            if (shouldSkip) return;
+
+            const laneIndex = Math.floor(Math.random() * FLYING_OBSTACLE_LANES.length);
+            const startY = FLYING_OBSTACLE_LANES[laneIndex];
+
+            const flyingObstacle = {
+                x: spawnX,
+                y: startY,
+                width: FLYING_OBSTACLE_WIDTH,
+                height: FLYING_OBSTACLE_HEIGHT,
+                velocityX: -FLYING_OBSTACLE_BASE_SPEED * speedMultiplier,
+                velocityY: 0,
+                wingPhase: Math.random() * Math.PI * 2
+            };
+
+            flyingObstacles.push(flyingObstacle);
+        }
+
+        function createCoin() {
+            const coin = {
+                x: canvas.width,
+                y: Math.random() * (canvas.height - GROUND_HEIGHT - COIN_SIZE),
+                width: COIN_SIZE,
+                height: COIN_SIZE
+            };
+            coins.push(coin);
+        }
+
+        function update() {
+            if (currentState !== GameState.PLAYING) return;
+
+            frames++;
+
+            // Update level timer
+            const elapsedTime = (Date.now() - levelStartTime) / 1000;
+            levelTimeRemaining = currentLevel.targetTime - elapsedTime;
+
+            if (levelTimeRemaining <= 0) {
+                completeLevel();
+                return;
+            }
+
+            updateTimerDisplay();
+
+            // Update hero position
+            hero.y += hero.velocityY;
+            hero.velocityY += GRAVITY;
+
+            // Ground collision
+            if (hero.y > canvas.height - GROUND_HEIGHT - hero.height) {
+                hero.y = canvas.height - GROUND_HEIGHT - hero.height;
+                hero.velocityY = 0;
+                hero.isJumping = false;
+                hero.isDoubleJumping = false;
+            }
+
+            // Update platforms
+            for (let i = platforms.length - 1; i >= 0; i--) {
+                platforms[i].x -= OBSTACLE_SPEED_BASE * speedMultiplier;
+
+                if (platforms[i].x + platforms[i].width < 0) {
+                    platforms.splice(i, 1);
+                    continue;
+                }
+
+                if (
+                    hero.x < platforms[i].x + platforms[i].width &&
+                    hero.x + hero.width > platforms[i].x &&
+                    hero.y + hero.height <= platforms[i].y &&
+                    hero.y + hero.height + hero.velocityY >= platforms[i].y
+                ) {
+                    hero.y = platforms[i].y - hero.height;
+                    hero.velocityY = 0;
+                    hero.isJumping = false;
+                    hero.isDoubleJumping = false;
+                }
+            }
+
+            // Update obstacles
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                obstacles[i].x -= OBSTACLE_SPEED_BASE * speedMultiplier;
+
+                if (obstacles[i].x + obstacles[i].width < 0) {
+                    obstacles.splice(i, 1);
+                    score += 1;
+                    scoreElement.textContent = score;
+                    continue;
+                }
+
+                if (
+                    !iceShieldActive &&
+                    hero.x < obstacles[i].x + obstacles[i].width &&
+                    hero.x + hero.width > obstacles[i].x &&
+                    hero.y < obstacles[i].y + obstacles[i].height &&
+                    hero.y + hero.height > obstacles[i].y
+                ) {
+                    hero.width *= 1.15;
+                    hero.height *= 1.15;
+                    hero.faceDirection = -1;
+                    iceShieldActive = true;
+                    iceShieldTimer = 60;
+                    
+                    if (hero.width > heroOriginalWidth * 4) {
+                        gameOver();
+                        return;
+                    }
+                }
+            }
+
+            // Update flying obstacles
+            for (let i = flyingObstacles.length - 1; i >= 0; i--) {
+                const bird = flyingObstacles[i];
+                bird.x += bird.velocityX;
+                bird.wingPhase += 0.2;
+
+                if (bird.x < -50) {
+                    flyingObstacles.splice(i, 1);
+                    continue;
+                }
+
+                if (
+                    !iceShieldActive &&
+                    hero.x < bird.x + FLYING_OBSTACLE_HITBOX &&
+                    hero.x + hero.width > bird.x - FLYING_OBSTACLE_HITBOX &&
+                    hero.y < bird.y + FLYING_OBSTACLE_HITBOX &&
+                    hero.y + hero.height > bird.y - FLYING_OBSTACLE_HITBOX
+                ) {
+                    hero.width *= 1.15;
+                    hero.height *= 1.15;
+                    hero.faceDirection = -1;
+                    iceShieldActive = true;
+                    iceShieldTimer = 60;
+                    
+                    if (hero.width > heroOriginalWidth * 4) {
+                        gameOver();
+                        return;
+                    }
+                }
+            }
+
+            // Update coins
+            for (let i = coins.length - 1; i >= 0; i--) {
+                coins[i].x -= OBSTACLE_SPEED_BASE * speedMultiplier;
+
+                if (coins[i].x + coins[i].width < 0) {
+                    coins.splice(i, 1);
+                    continue;
+                }
+
+                if (
+                    hero.x < coins[i].x + coins[i].width &&
+                    hero.x + hero.width > coins[i].x &&
+                    hero.y < coins[i].y + coins[i].height &&
+                    hero.y + hero.height > coins[i].y
+                ) {
+                    coins.splice(i, 1);
+                    score += 5;
+                    scoreElement.textContent = score;
+
+                    if (Math.random() < 0.3) {
+                        if (Math.random() < 0.5) {
+                            iceShieldActive = true;
+                            iceShieldTimer = 300;
+                        } else {
+                            doubleJumpActive = true;
+                            doubleJumpTimer = 300;
+                        }
+                    }
+                }
+            }
+
+            // Update power-up timers
+            if (iceShieldActive) {
+                iceShieldTimer--;
+                if (iceShieldTimer <= 0) {
+                    iceShieldActive = false;
+                }
+                iceShieldTimeElement.textContent = Math.ceil(iceShieldTimer / 60);
+            } else {
+                iceShieldTimeElement.textContent = '0';
+            }
+
+            if (doubleJumpActive) {
+                doubleJumpTimer--;
+                if (doubleJumpTimer <= 0) {
+                    doubleJumpActive = false;
+                }
+                doubleJumpTimeElement.textContent = Math.ceil(doubleJumpTimer / 60);
+            } else {
+                doubleJumpTimeElement.textContent = '0';
+            }
+
+            // Increase speed over time (level-specific rate)
+            speedMultiplier += currentLevel.speedGrowthRate / 60;
+            speedElement.textContent = speedMultiplier.toFixed(1);
+
+            // Spawn entities based on level frequencies
+            if (frames % Math.floor(120 / currentLevel.platformFrequency) === 0) {
+                createPlatform();
+            }
+
+            if (Math.random() < 0.02 * currentLevel.obstacleFrequency) {
+                createObstacle();
+            }
+
+            if (frames >= FLYING_OBSTACLE_FIRST_DELAY) {
+                const adjustedMin = FLYING_OBSTACLE_SPAWN_MIN / (1 + speedMultiplier * 0.15) / currentLevel.birdFrequency;
+                const adjustedMax = FLYING_OBSTACLE_SPAWN_MAX / (1 + speedMultiplier * 0.15) / currentLevel.birdFrequency;
+
+                flyingObstacleSpawnTimer++;
+                if (flyingObstacleSpawnTimer >= adjustedMin + Math.random() * (adjustedMax - adjustedMin)) {
+                    createFlyingObstacle();
+                    flyingObstacleSpawnTimer = 0;
+                }
+            }
+
+            if (Math.random() < COIN_SPAWN_RATE * currentLevel.coinMultiplier) {
+                createCoin();
+            }
+        }
+
+        function draw() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw background (level-specific)
+            ctx.fillStyle = currentLevel ? currentLevel.background : '#87CEEB';
+            ctx.fillRect(0, 0, canvas.width, canvas.height - GROUND_HEIGHT);
+
+            // Draw ground (level-specific)
+            ctx.fillStyle = currentLevel ? currentLevel.groundColor : '#8B4513';
+            ctx.fillRect(0, canvas.height - GROUND_HEIGHT, canvas.width, GROUND_HEIGHT);
+
+            // Draw grass on top of ground
+            ctx.fillStyle = '#2E8B57';
+            ctx.fillRect(0, canvas.height - GROUND_HEIGHT, canvas.width, 10);
+
+            // Draw platforms
+            ctx.fillStyle = '#A0522D';
+            platforms.forEach(platform => {
+                ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+
+                ctx.fillStyle = '#8B4513';
+                for (let i = 0; i < platform.width; i += 10) {
+                    ctx.fillRect(platform.x + i, platform.y, 5, 3);
+                }
+                ctx.fillStyle = '#A0522D';
+            });
+
+            // Draw coins
+            coins.forEach(coin => {
+                ctx.fillStyle = '#FFD700';
+                ctx.beginPath();
+                ctx.arc(coin.x + coin.width/2, coin.y + coin.height/2, coin.width/2, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#DAA520';
+                ctx.beginPath();
+                ctx.arc(coin.x + coin.width/2, coin.y + coin.height/2, coin.width/3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Draw obstacles
+            ctx.fillStyle = '#FF0000';
+            obstacles.forEach(obstacle => {
+                ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+
+                ctx.fillStyle = '#CC0000';
+                for (let i = 0; i < obstacle.width; i += 10) {
+                    ctx.beginPath();
+                    ctx.moveTo(obstacle.x + i, obstacle.y);
+                    ctx.lineTo(obstacle.x + i + 5, obstacle.y - 5);
+                    ctx.lineTo(obstacle.x + i + 10, obstacle.y);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+                ctx.fillStyle = '#FF0000';
+            });
+
+            // Draw flying obstacles
+            flyingObstacles.forEach(bird => {
+                ctx.save();
+                ctx.translate(bird.x, bird.y);
+
+                const halfWidth = FLYING_OBSTACLE_WIDTH / 2;
+                const halfHeight = FLYING_OBSTACLE_HEIGHT / 2;
+
+                ctx.fillStyle = '#8B0000';
+                ctx.beginPath();
+                ctx.moveTo(-halfWidth, 0);
+                ctx.lineTo(0, -halfHeight);
+                ctx.lineTo(halfWidth, 0);
+                ctx.lineTo(0, halfHeight);
+                ctx.closePath();
+                ctx.fill();
+
+                const wingOffset = Math.sin(bird.wingPhase) * 8;
+                ctx.fillStyle = '#A52A2A';
+
+                ctx.beginPath();
+                ctx.moveTo(-5, -halfHeight + 2);
+                ctx.lineTo(0, -halfHeight - wingOffset);
+                ctx.lineTo(5, -halfHeight + 2);
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.beginPath();
+                ctx.moveTo(-5, halfHeight - 2);
+                ctx.lineTo(0, halfHeight + wingOffset);
+                ctx.lineTo(5, halfHeight - 2);
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.fillStyle = '#000';
+                ctx.beginPath();
+                ctx.arc(halfWidth/2, -halfHeight/4, 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.restore();
+            });
+
+            // Draw hero
+            ctx.fillStyle = '#3498db';
+            ctx.fillRect(hero.x, hero.y, hero.width, hero.height);
+
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(hero.x + hero.width * 0.25, hero.y + hero.height * 0.3, 3, 0, Math.PI * 2);
+            ctx.arc(hero.x + hero.width * 0.75, hero.y + hero.height * 0.3, 3, 0, Math.PI * 2);
+            ctx.fill();
+
+            if (hero.faceDirection === 1) {
+                ctx.beginPath();
+                ctx.arc(hero.x + hero.width * 0.5, hero.y + hero.height * 0.7, 5, 0, Math.PI);
+                ctx.stroke();
+            } else {
+                ctx.beginPath();
+                ctx.arc(hero.x + hero.width * 0.5, hero.y + hero.height * 0.7, 5, Math.PI, 0);
+                ctx.stroke();
+            }
+
+            // Draw ice shield if active
+            if (iceShieldActive) {
+                ctx.strokeStyle = '#00FFFF';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(
+                    hero.x + hero.width/2,
+                    hero.y + hero.height/2,
+                    Math.max(hero.width, hero.height)/2 + 5,
+                    0,
+                    Math.PI * 2
+                );
+                ctx.stroke();
+                ctx.lineWidth = 1;
+            }
+
+            // Draw clouds
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            drawCloud(100, 50, 30);
+            drawCloud(300, 80, 40);
+            drawCloud(500, 40, 35);
+            drawCloud(700, 70, 25);
+        }
+
+        function drawCloud(x, y, size) {
+            ctx.beginPath();
+            ctx.arc(x, y, size, 0, Math.PI * 2);
+            ctx.arc(x + size * 0.8, y - size * 0.2, size * 0.8, 0, Math.PI * 2);
+            ctx.arc(x + size * 1.5, y, size * 0.9, 0, Math.PI * 2);
+            ctx.arc(x + size * 0.8, y + size * 0.2, size * 0.7, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function animate() {
+            if (currentState !== GameState.PLAYING) return;
+
+            update();
+            draw();
+
+            requestAnimationFrame(animate);
+        }
+
+        function jump() {
+            if (currentState !== GameState.PLAYING) return;
+
+            if (!hero.isJumping) {
+                hero.velocityY = JUMP_FORCE;
+                hero.isJumping = true;
+                hero.faceDirection = -1;
+            } else if (doubleJumpActive && !hero.isDoubleJumping) {
+                hero.velocityY = JUMP_FORCE * 0.9;
+                hero.isDoubleJumping = true;
+                hero.faceDirection = -1;
+            }
+        }
+
+        function handleKeyDown(e) {
+            if ((e.code === 'Space' || e.key === ' ') && currentState === GameState.PLAYING) {
+                e.preventDefault();
+                jump();
+            } else if ((e.code === 'Escape' || e.key === 'p' || e.key === 'P') && currentState === GameState.PLAYING) {
+                pauseGame();
+            } else if ((e.code === 'Escape' || e.key === 'p' || e.key === 'P') && currentState === GameState.PAUSED) {
+                resumeGame();
+            }
+        }
+
+        function handleKeyUp(e) {
+            if (e.code === 'Space' || e.key === ' ') {
+                hero.faceDirection = 1;
+            }
+        }
+
+        function handleTouch(e) {
+            e.preventDefault();
+            if (currentState === GameState.PLAYING) {
+                jump();
+            }
+        }
+
+        function handleTouchEnd(e) {
+            e.preventDefault();
+            hero.faceDirection = 1;
+        }
+
+        function handleMouse(e) {
+            if (currentState === GameState.PLAYING) {
+                jump();
+            }
+        }
+
+        // Start the game
+        window.onload = init;
     </script>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+</body>
 </html>
