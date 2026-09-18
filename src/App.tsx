@@ -121,9 +121,9 @@ interface Obstacle {
 interface FlyingObstacle {
   x: number;
   y: number;
-  size: number;
+  width: number;
+  height: number;
   velocityX: number;
-  velocityY: number;
   wingPhase: number;
 }
 
@@ -366,22 +366,17 @@ function spawnObstacle(state: GameState): void {
 }
 
 function spawnFlyingObstacle(state: GameState): void {
+  // Don't spawn birds in first 15 seconds
   if (state.survivalTime < FLYING_OBSTACLE_FIRST_DELAY) return;
 
   const speedMultiplier = state.scrollSpeed / state.baseSpeed;
   const spawnX = CANVAS_WIDTH + 50;
 
-  const tier = Math.random();
-  let startY: number;
+  // Choose random lane from the 4 fixed heights
+  const laneIndex = Math.floor(Math.random() * FLYING_OBSTACLE_LANES.length);
+  const startY = FLYING_OBSTACLE_LANES[laneIndex];
 
-  if (tier < 0.6) {
-    startY = randomRange(100, 200);
-  } else if (tier < 0.85) {
-    startY = randomRange(50, 100);
-  } else {
-    startY = randomRange(200, 250);
-  }
-
+  // Safe spawning: don't spawn if there's a ground obstacle within 200px
   const hasNearbyObstacle = state.obstacles.some(obs => {
     const obsTop = obs.y;
     const obsBottom = obs.y + obs.height;
@@ -391,18 +386,15 @@ function spawnFlyingObstacle(state: GameState): void {
 
   if (hasNearbyObstacle) return;
 
+  // Horizontal movement only - NO vertical drift
   const velocityX = -(FLYING_OBSTACLE_BASE_SPEED * speedMultiplier);
-  const verticalDrift = randomRange(-100, 100) / 100;
-  const velocityY = verticalDrift * speedMultiplier;
-
-  const size = randomRange(20, 30);
 
   state.flyingObstacles.push({
     x: spawnX,
     y: startY,
-    size,
+    width: FLYING_OBSTACLE_WIDTH,
+    height: FLYING_OBSTACLE_HEIGHT,
     velocityX,
-    velocityY,
     wingPhase: Math.random() * Math.PI * 2,
   });
 }
@@ -572,7 +564,7 @@ function checkCollisions(state: GameState): void {
   if (state.invincibilityTimer <= 0) {
     for (let i = state.flyingObstacles.length - 1; i >= 0; i--) {
       const bird = state.flyingObstacles[i];
-      if (circleCircleCollision(HERO_X, state.heroY, heroR, bird.x, bird.y, bird.size * 0.8)) {
+      if (circleCircleCollision(HERO_X, state.heroY, heroR, bird.x, bird.y, FLYING_OBSTACLE_HITBOX / 2)) {
         handleObstacleHit(state, bird.x, bird.y);
         state.flyingObstacles.splice(i, 1);
         break;
@@ -845,11 +837,12 @@ function App() {
 
     for (let i = state.flyingObstacles.length - 1; i >= 0; i--) {
       const bird = state.flyingObstacles[i];
+      // Horizontal movement only - NO vertical movement
       bird.x += bird.velocityX;
-      bird.y += bird.velocityY;
       bird.wingPhase += 0.2;
 
-      if (bird.x < -50 || bird.y > CANVAS_HEIGHT || bird.y < -100) {
+      // Remove bird only when it goes off-screen to the left
+      if (bird.x < -50) {
         state.flyingObstacles.splice(i, 1);
       }
     }
@@ -1148,41 +1141,44 @@ function App() {
       ctx.strokeRect(obs.x, obs.y, obs.width, obs.height);
     }
 
-    // Flying Obstacles (Birds)
+    // Flying Obstacles (Birds) - Perfectly horizontal flight
     for (const bird of state.flyingObstacles) {
       ctx.save();
       ctx.translate(bird.x, bird.y);
       
-      const rotation = Math.atan2(bird.velocityY, Math.abs(bird.velocityX)) * 0.5;
-      ctx.rotate(rotation);
+      // NO rotation - birds fly perfectly horizontal
 
+      // Draw bird body as red diamond/triangle pointing left
       ctx.fillStyle = '#dc2626';
       ctx.beginPath();
-      ctx.moveTo(0, -bird.size * 0.5);
-      ctx.lineTo(bird.size * 0.4, 0);
-      ctx.lineTo(0, bird.size * 0.5);
-      ctx.lineTo(-bird.size * 0.4, 0);
+      ctx.moveTo(-bird.width / 2, 0);  // Left point (nose)
+      ctx.lineTo(0, -bird.height / 2);  // Top point
+      ctx.lineTo(bird.width / 2, 0);    // Right point (tail)
+      ctx.lineTo(0, bird.height / 2);   // Bottom point
       ctx.closePath();
       ctx.fill();
       ctx.strokeStyle = '#991b1b';
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      const wingOffset = Math.sin(bird.wingPhase) * bird.size * 0.3;
+      // Draw animated wings
+      const wingOffset = Math.sin(bird.wingPhase) * bird.height * 0.4;
       ctx.fillStyle = '#ef4444';
       
+      // Top wing
       ctx.beginPath();
-      ctx.moveTo(-bird.size * 0.3, 0);
-      ctx.lineTo(-bird.size * 0.8, -wingOffset);
-      ctx.lineTo(-bird.size * 0.3, bird.size * 0.2);
+      ctx.moveTo(-bird.width * 0.2, -bird.height * 0.1);
+      ctx.lineTo(0, -bird.height * 0.5 - wingOffset);
+      ctx.lineTo(bird.width * 0.2, -bird.height * 0.1);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
 
+      // Bottom wing
       ctx.beginPath();
-      ctx.moveTo(bird.size * 0.3, 0);
-      ctx.lineTo(bird.size * 0.8, -wingOffset);
-      ctx.lineTo(bird.size * 0.3, bird.size * 0.2);
+      ctx.moveTo(-bird.width * 0.2, bird.height * 0.1);
+      ctx.lineTo(0, bird.height * 0.5 + wingOffset);
+      ctx.lineTo(bird.width * 0.2, bird.height * 0.1);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
