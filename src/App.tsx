@@ -653,6 +653,7 @@ function handleObstacleHit(state: GameState, obsX: number, obsY: number): void {
   if (state.heroRadius > state.maxRadiusReached) {
     state.maxRadiusReached = state.heroRadius;
   }
+  console.log(`[HIT] Hero radius: ${state.heroRadius.toFixed(2)} / ${MAX_RADIUS}`);
 
   state.flashTimer = 15;
   state.squishTimer = 12;
